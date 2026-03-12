@@ -57,19 +57,10 @@ exit 0
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-#[test]
-fn cli_exercises_repo_workflow() {
-    let workspace = unique_temp_dir("workspace");
-    let source_repo = unique_temp_dir("source");
-    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("fixtures")
-        .join("example-compositor-template");
-
-    copy_dir_all(&fixture_root, &source_repo);
-    run(Command::new("git").args(["init", "-b", "main"]).current_dir(&source_repo));
-    run(Command::new("git").args(["add", "."]).current_dir(&source_repo));
+fn create_git_fixture(fixture_root: &Path, source_repo: &Path) {
+    copy_dir_all(fixture_root, source_repo);
+    run(Command::new("git").args(["init", "-b", "main"]).current_dir(source_repo));
+    run(Command::new("git").args(["add", "."]).current_dir(source_repo));
     run(
         Command::new("git")
             .args([
@@ -81,8 +72,21 @@ fn cli_exercises_repo_workflow() {
                 "-m",
                 "fixture",
             ])
-            .current_dir(&source_repo),
+            .current_dir(source_repo),
     );
+}
+
+#[test]
+fn cli_exercises_repo_workflow() {
+    let workspace = unique_temp_dir("workspace");
+    let source_repo = unique_temp_dir("source");
+    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fixtures")
+        .join("example-compositor-template");
+
+    create_git_fixture(&fixture_root, &source_repo);
 
     fs::create_dir_all(&workspace).unwrap();
     let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
@@ -151,4 +155,54 @@ fn cli_exercises_repo_workflow() {
         .join("bin")
         .join("example-compositor")
         .exists());
+}
+
+#[test]
+fn cli_autodetects_cargo_repo_workflow() {
+    let workspace = unique_temp_dir("cargo-workspace");
+    let source_repo = unique_temp_dir("cargo-source");
+    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fixtures")
+        .join("cargo-compositor-template");
+
+    create_git_fixture(&fixture_root, &source_repo);
+    fs::create_dir_all(&workspace).unwrap();
+
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let repo_url = source_repo.display().to_string();
+    let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
+
+    run(
+        Command::new(&binary)
+            .args(["repo", "add", &repo_url, "--rev", "main"])
+            .current_dir(&workspace),
+    );
+    run(
+        Command::new(&binary)
+            .args(["repo", "sync", repo_id])
+            .current_dir(&workspace),
+    );
+
+    let manifest = fs::read_to_string(
+        workspace
+            .join("repos")
+            .join(repo_id)
+            .join("macland.toml"),
+    )
+    .unwrap();
+    assert!(manifest.contains("build_system = \"cargo\""));
+    assert!(manifest.contains("entrypoint = [\"cargo\", \"run\", \"--bin\", \"cargo-compositor\"]"));
+
+    run(
+        Command::new(&binary)
+            .args(["build", repo_id, "--execute"])
+            .current_dir(&workspace),
+    );
+    run(
+        Command::new(&binary)
+            .args(["test", repo_id, "--upstream", "--execute"])
+            .current_dir(&workspace),
+    );
 }

@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod bootstrap;
 pub mod conformance;
+pub mod detect;
 pub mod doctor;
 pub mod host;
 pub mod repo;

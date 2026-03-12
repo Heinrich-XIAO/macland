@@ -1,0 +1,9 @@
+[package]
+name = "cargo-compositor"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "cargo-compositor"
+path = "src/main.rs"
+

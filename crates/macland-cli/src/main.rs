@@ -1,6 +1,7 @@
 use macland_core::adapter::AdapterManifest;
 use macland_core::bootstrap::{execute_bootstrap, BootstrapPlan};
 use macland_core::conformance::run_conformance;
+use macland_core::detect::autodetect_manifest;
 use macland_core::doctor::DoctorReport;
 use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
@@ -109,9 +110,9 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
                 if !status.success() {
                     return Err(format!("git clone failed with status {status}"));
                 }
-                if let Some(rev) = spec.rev {
+                if let Some(ref rev) = spec.rev {
                     let status = Command::new("git")
-                        .args(["checkout", &rev])
+                        .args(["checkout", rev])
                         .current_dir(&source_root)
                         .status()
                         .map_err(|err| err.to_string())?;
@@ -120,6 +121,7 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
                     }
                 }
             }
+            maybe_autodetect_manifest(workspace, &spec, &source_root)?;
             println!("synced repo: {repo_id}");
             Ok(())
         }
@@ -312,4 +314,68 @@ fn run_bootstrap(execute: bool) -> Result<(), String> {
         println!("bootstrap_status: success");
     }
     Ok(())
+}
+
+fn maybe_autodetect_manifest(
+    workspace: &RepoWorkspace,
+    spec: &RepoSpec,
+    source_root: &Path,
+) -> Result<(), String> {
+    let current = workspace.load_manifest(spec)?;
+    let is_template = current.build_system == macland_core::adapter::BuildSystem::Custom
+        && current.build.is_empty()
+        && current.test.is_empty()
+        && current.entrypoint.is_empty();
+    if !is_template {
+        return Ok(());
+    }
+
+    let rev = spec.rev.clone().unwrap_or_else(|| "main".to_string());
+    if let Some(detected) = autodetect_manifest(&spec.id, &spec.url, &rev, source_root) {
+        let contents = render_manifest(&detected);
+        workspace.write_manifest(spec, &contents)?;
+    }
+    Ok(())
+}
+
+fn render_manifest(manifest: &AdapterManifest) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("id = {:?}\n", manifest.id));
+    output.push_str(&format!("repo = {:?}\n", manifest.repo));
+    output.push_str(&format!("rev = {:?}\n", manifest.rev));
+    output.push_str(&format!("build_system = {:?}\n", format_build_system(manifest.build_system)));
+    output.push_str(&format!("configure = {}\n", format_array(&manifest.configure)));
+    output.push_str(&format!("build = {}\n", format_array(&manifest.build)));
+    output.push_str(&format!("test = {}\n", format_array(&manifest.test)));
+    output.push_str(&format!("entrypoint = {}\n", format_array(&manifest.entrypoint)));
+    output.push_str(&format!("patch_policy = {:?}\n", manifest.patch_policy));
+    output.push_str(&format!("sdk_features = {}\n", format_array(&manifest.sdk_features)));
+    output.push_str(&format!(
+        "protocol_expectations = {}\n\n[env]\n",
+        format_array(&manifest.protocol_expectations)
+    ));
+    for (key, value) in &manifest.env {
+        output.push_str(&format!("{key} = {:?}\n", value));
+    }
+    output
+}
+
+fn format_array(values: &[String]) -> String {
+    let items = values
+        .iter()
+        .map(|value| format!("{value:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{items}]")
+}
+
+fn format_build_system(system: macland_core::adapter::BuildSystem) -> &'static str {
+    match system {
+        macland_core::adapter::BuildSystem::Meson => "meson",
+        macland_core::adapter::BuildSystem::CMake => "cmake",
+        macland_core::adapter::BuildSystem::Cargo => "cargo",
+        macland_core::adapter::BuildSystem::Autotools => "autotools",
+        macland_core::adapter::BuildSystem::Make => "make",
+        macland_core::adapter::BuildSystem::Custom => "custom",
+    }
 }

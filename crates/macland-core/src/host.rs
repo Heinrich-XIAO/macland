@@ -77,7 +77,7 @@ pub fn launch_host(host_binary: &Path, artifacts: &HostLaunchArtifacts) -> Resul
 
 fn resolve_binary(source_root: &Path, binary: &str) -> PathBuf {
     let path = PathBuf::from(binary);
-    if path.is_absolute() {
+    if path.is_absolute() || !binary.contains('/') {
         path
     } else {
         source_root.join(path)
