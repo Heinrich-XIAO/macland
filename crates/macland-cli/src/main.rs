@@ -159,6 +159,7 @@ fn print_doctor(workspace: &RepoWorkspace, report: DoctorReport) {
         report.backend.supports_multi_display_session
     );
     println!("backend.c_abi={}", report.backend.supports_c_abi);
+    println!("backend.event_queue={}", report.backend.supports_event_queue);
     println!(
         "backend.permissions={}",
         report.backend.permission_requirements.join(",")

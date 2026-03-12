@@ -5,6 +5,10 @@ struct SelfTestFailure: Error, CustomStringConvertible {
     let description: String
 }
 
+private struct PermissionProbeEnvelope: Decodable {
+    let states: [String: String]
+}
+
 func assert(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw SelfTestFailure(description: message)
@@ -33,8 +37,8 @@ func runSelfTests() throws {
     ])
     try assert(audit.missingRequiredPermissions == [.inputMonitoring], "expected missing input monitoring")
     let encodedAudit = try PermissionProbe.encodeCurrentAudit()
-    let decodedAudit = try JSONDecoder().decode(PermissionAudit.self, from: encodedAudit)
-    try assert(decodedAudit.states[.accessibility] != nil, "expected accessibility state")
+    let decodedAudit = try JSONDecoder().decode(PermissionProbeEnvelope.self, from: encodedAudit)
+    try assert(decodedAudit.states["accessibility"] != nil, "expected accessibility state")
 
     let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)

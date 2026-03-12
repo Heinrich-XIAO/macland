@@ -1,5 +1,6 @@
 use crate::adapter::AdapterManifest;
 use crate::host::{create_launch_request, launch_host, HostLaunchArtifacts, HostSessionMode};
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -31,12 +32,26 @@ pub fn run_conformance(
 
 fn parse_status(artifacts: &HostLaunchArtifacts) -> Result<ConformanceReport, String> {
     let status = fs::read_to_string(&artifacts.status_path).map_err(|err| err.to_string())?;
+    if let Ok(envelope) = serde_json::from_str::<StatusEnvelope>(&status) {
+        return Ok(ConformanceReport {
+            host_launched: true,
+            child_started: envelope.status.contains("child_started"),
+            child_exited_successfully: envelope.status.contains("child_exit:0"),
+            status_file: artifacts.status_path.clone(),
+        });
+    }
+
     Ok(ConformanceReport {
         host_launched: true,
         child_started: status.contains("child_started"),
         child_exited_successfully: status.contains("child_exit:0"),
         status_file: artifacts.status_path.clone(),
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusEnvelope {
+    status: String,
 }
 
 #[cfg(test)]

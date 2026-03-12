@@ -10,6 +10,7 @@ pub struct BackendCapabilities {
     pub supports_single_display_session: bool,
     pub supports_multi_display_session: bool,
     pub supports_c_abi: bool,
+    pub supports_event_queue: bool,
     pub permission_requirements: Vec<String>,
 }
 
@@ -23,6 +24,7 @@ impl BackendCapabilities {
             supports_single_display_session: true,
             supports_multi_display_session: false,
             supports_c_abi: false,
+            supports_event_queue: false,
             permission_requirements: vec![
                 "accessibility".to_string(),
                 "input-monitoring".to_string(),
