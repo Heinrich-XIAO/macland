@@ -93,29 +93,98 @@ fn effective_env(env_pairs: &BTreeMap<String, String>) -> BTreeMap<String, Strin
     if let Some(path) = merged_pkg_config_path(env_pairs.get("PKG_CONFIG_PATH")) {
         merged.insert("PKG_CONFIG_PATH".to_string(), path);
     }
+    if let Some(path) = merged_prefix_path(env_pairs.get("CMAKE_PREFIX_PATH")) {
+        merged.insert("CMAKE_PREFIX_PATH".to_string(), path);
+    }
+    if let Some(path) = merged_include_path(env_pairs.get("CPATH")) {
+        merged.insert("CPATH".to_string(), path);
+    }
+    if let Some(path) = merged_library_path(env_pairs.get("LIBRARY_PATH")) {
+        merged.insert("LIBRARY_PATH".to_string(), path);
+    }
+    if let Some(path) = merged_library_path(env_pairs.get("DYLD_FALLBACK_LIBRARY_PATH")) {
+        merged.insert("DYLD_FALLBACK_LIBRARY_PATH".to_string(), path);
+    }
     merged
 }
 
 fn merged_pkg_config_path(override_value: Option<&String>) -> Option<String> {
-    let mut paths = Vec::new();
-
-    if let Some(value) = env::var_os("PKG_CONFIG_PATH") {
-        paths.extend(env::split_paths(&value).map(|path| path.display().to_string()));
-    }
-    if let Some(value) = override_value {
-        paths.extend(env::split_paths(value).map(|path| path.display().to_string()));
-    }
-
-    for candidate in [
+    merge_path_list(
+        env::var_os("PKG_CONFIG_PATH"),
+        override_value,
+        &[
         "/opt/homebrew/lib/pkgconfig",
         "/opt/homebrew/share/pkgconfig",
         "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
         "/opt/homebrew/opt/mesa/lib/pkgconfig",
         "/usr/local/lib/pkgconfig",
         "/usr/local/share/pkgconfig",
-    ] {
+    ],
+    )
+}
+
+fn merged_prefix_path(override_value: Option<&String>) -> Option<String> {
+    merge_path_list(
+        env::var_os("CMAKE_PREFIX_PATH"),
+        override_value,
+        &[
+            "/opt/homebrew",
+            "/opt/homebrew/opt/libxkbcommon",
+            "/opt/homebrew/opt/mesa",
+            "/usr/local",
+            "/usr/local/opt/libxkbcommon",
+            "/usr/local/opt/mesa",
+        ],
+    )
+}
+
+fn merged_include_path(override_value: Option<&String>) -> Option<String> {
+    merge_path_list(
+        env::var_os("CPATH"),
+        override_value,
+        &[
+            "/opt/homebrew/include",
+            "/opt/homebrew/opt/libxkbcommon/include",
+            "/opt/homebrew/opt/mesa/include",
+            "/usr/local/include",
+            "/usr/local/opt/libxkbcommon/include",
+            "/usr/local/opt/mesa/include",
+        ],
+    )
+}
+
+fn merged_library_path(override_value: Option<&String>) -> Option<String> {
+    merge_path_list(
+        env::var_os("LIBRARY_PATH"),
+        override_value,
+        &[
+            "/opt/homebrew/lib",
+            "/opt/homebrew/opt/libxkbcommon/lib",
+            "/opt/homebrew/opt/mesa/lib",
+            "/usr/local/lib",
+            "/usr/local/opt/libxkbcommon/lib",
+            "/usr/local/opt/mesa/lib",
+        ],
+    )
+}
+
+fn merge_path_list(
+    inherited_value: Option<std::ffi::OsString>,
+    override_value: Option<&String>,
+    candidates: &[&str],
+) -> Option<String> {
+    let mut paths = Vec::new();
+
+    if let Some(value) = inherited_value {
+        paths.extend(env::split_paths(&value).map(|path| path.display().to_string()));
+    }
+    if let Some(value) = override_value {
+        paths.extend(env::split_paths(value).map(|path| path.display().to_string()));
+    }
+
+    for candidate in candidates {
         if Path::new(candidate).exists() && !paths.iter().any(|path| path == candidate) {
-            paths.push(candidate.to_string());
+            paths.push((*candidate).to_string());
         }
     }
 
@@ -148,7 +217,10 @@ pub fn execute_recorded_command_line(
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandPlan, execute_command_line, inspect_manifest, merged_pkg_config_path};
+    use super::{
+        CommandPlan, execute_command_line, inspect_manifest, merged_include_path,
+        merged_library_path, merged_pkg_config_path, merged_prefix_path,
+    };
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
 
@@ -186,5 +258,19 @@ mod tests {
     fn augments_pkg_config_path_with_homebrew_roots() {
         let merged = merged_pkg_config_path(None).unwrap();
         assert!(merged.contains("/opt/homebrew/lib/pkgconfig"));
+    }
+
+    #[test]
+    fn augments_cmake_prefix_path_with_homebrew_roots() {
+        let merged = merged_prefix_path(None).unwrap();
+        assert!(merged.contains("/opt/homebrew"));
+    }
+
+    #[test]
+    fn augments_include_and_library_paths_with_homebrew_roots() {
+        let include = merged_include_path(None).unwrap();
+        let library = merged_library_path(None).unwrap();
+        assert!(include.contains("/opt/homebrew/include"));
+        assert!(library.contains("/opt/homebrew/lib"));
     }
 }
