@@ -5,7 +5,8 @@ use macland_core::detect::autodetect_manifest;
 use macland_core::doctor::DoctorReport;
 use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
-use macland_core::runner::{execute_command_line, inspect_manifest, CommandPlan};
+use macland_core::report::{ActionRecord, SupportReport, SupportTier, load_action_record, write_action_record};
+use macland_core::runner::{execute_recorded_command_line, inspect_manifest, CommandPlan};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -36,7 +37,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "inspect" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
             let manifest = load_manifest(&workspace, repo_id)?;
-            let report = inspect_manifest(&manifest);
+            let spec = workspace
+                .load_repo_spec(repo_id)
+                .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
+            let report = inspect_repo(&workspace, &spec, &manifest);
             println!("repo: {}", manifest.id);
             println!("buildable: {}", report.buildable);
             println!("upstream_tests_pass: {}", report.upstream_tests_pass);
@@ -153,6 +157,7 @@ fn run_action(
     let spec = workspace.load_repo_spec(repo_id).unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
     let source_root = workspace.source_root(&spec);
     let repo_root = if source_root.exists() { source_root } else { workspace.repo_root(&spec) };
+    let reports_root = workspace.artifacts_root(&spec).join("reports");
 
     let line = match action {
         "build" => plan.build,
@@ -170,7 +175,7 @@ fn run_action(
         CommandPlan::upstream_test_hint(manifest.build_system)
     );
     if execute {
-        execute_command_line(&repo_root, &line, &manifest.env)?;
+        execute_recorded_command_line(action, &repo_root, &line, &manifest.env, &reports_root)?;
         println!("status: success");
     }
     Ok(())
@@ -197,9 +202,10 @@ fn run_test_action(
     println!("upstream_command: {}", plan.test.join(" "));
     println!("run_upstream: {}", run_upstream);
     println!("run_conformance: {}", run_conformance_checks);
+    let reports_root = workspace.artifacts_root(&spec).join("reports");
 
     if execute && run_upstream {
-        execute_command_line(&source_root, &plan.test, &manifest.env)?;
+        execute_recorded_command_line("test", &source_root, &plan.test, &manifest.env, &reports_root)?;
         println!("upstream_status: success");
     }
 
@@ -223,6 +229,25 @@ fn run_test_action(
             println!("conformance_launch_request: {}", artifacts.request_path.display());
             return Ok(());
         };
+        if execute {
+            write_action_record(
+                &reports_root,
+                &ActionRecord {
+                    action: "conformance".to_string(),
+                    success: report.passed(),
+                    command: vec![
+                        host_binary.display().to_string(),
+                        "--config".to_string(),
+                        workspace
+                            .artifacts_root(&spec)
+                            .join("conformance")
+                            .join("host-launch.json")
+                            .display()
+                            .to_string(),
+                    ],
+                },
+            )?;
+        }
         println!("conformance_status_file: {}", report.status_file.display());
         println!("conformance_passed: {}", report.passed());
     }
@@ -263,6 +288,18 @@ fn run_run_action(
 
     if execute {
         launch_host(&host_binary, &artifacts)?;
+        write_action_record(
+            &workspace.artifacts_root(&spec).join("reports"),
+            &ActionRecord {
+                action: "run".to_string(),
+                success: true,
+                command: vec![
+                    host_binary.display().to_string(),
+                    "--config".to_string(),
+                    artifacts.request_path.display().to_string(),
+                ],
+            },
+        )?;
         println!("status: success");
     }
     Ok(())
@@ -378,4 +415,34 @@ fn format_build_system(system: macland_core::adapter::BuildSystem) -> &'static s
         macland_core::adapter::BuildSystem::Make => "make",
         macland_core::adapter::BuildSystem::Custom => "custom",
     }
+}
+
+fn inspect_repo(workspace: &RepoWorkspace, spec: &RepoSpec, manifest: &AdapterManifest) -> SupportReport {
+    let mut report = inspect_manifest(manifest);
+    let reports_root = workspace.artifacts_root(spec).join("reports");
+    report.upstream_tests_pass = load_action_record(&reports_root, "test")
+        .map(|record| record.success)
+        .unwrap_or(false);
+    report.conformance_pass = load_action_record(&reports_root, "conformance")
+        .map(|record| record.success)
+        .unwrap_or(false);
+    report.fullscreen_run_pass = load_action_record(&reports_root, "run")
+        .map(|record| record.success)
+        .unwrap_or(false);
+    if load_action_record(&reports_root, "build")
+        .map(|record| record.success)
+        .unwrap_or(false)
+    {
+        report.buildable = true;
+    }
+
+    report.tier = if report.fullscreen_run_pass && report.conformance_pass {
+        SupportTier::Tier1
+    } else if report.buildable {
+        SupportTier::Experimental
+    } else {
+        SupportTier::Experimental
+    };
+
+    report
 }

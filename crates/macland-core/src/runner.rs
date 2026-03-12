@@ -1,5 +1,5 @@
 use crate::adapter::{AdapterManifest, BuildSystem};
-use crate::report::{SupportReport, SupportTier};
+use crate::report::{ActionRecord, SupportReport, SupportTier, write_action_record};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -84,6 +84,26 @@ pub fn execute_command_line(
     } else {
         Err(format!("command `{}` failed with status {}", command.join(" "), status))
     }
+}
+
+pub fn execute_recorded_command_line(
+    action: &str,
+    cwd: &Path,
+    command: &[String],
+    env_pairs: &BTreeMap<String, String>,
+    reports_root: &Path,
+) -> Result<(), String> {
+    let result = execute_command_line(cwd, command, env_pairs);
+    let success = result.is_ok();
+    write_action_record(
+        reports_root,
+        &ActionRecord {
+            action: action.to_string(),
+            success,
+            command: command.to_vec(),
+        },
+    )?;
+    result
 }
 
 #[cfg(test)]

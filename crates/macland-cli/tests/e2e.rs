@@ -148,6 +148,14 @@ fn cli_exercises_repo_workflow() {
             .current_dir(&workspace),
     );
 
+    let inspect_output = output(
+        Command::new(&binary)
+            .args(["inspect", source_repo.file_name().unwrap().to_str().unwrap()])
+            .current_dir(&workspace),
+    );
+    assert!(inspect_output.contains("conformance_pass: true"));
+    assert!(inspect_output.contains("fullscreen_run_pass: true"));
+
     assert!(workspace
         .join("repos")
         .join(source_repo.file_name().unwrap())
@@ -205,4 +213,11 @@ fn cli_autodetects_cargo_repo_workflow() {
             .args(["test", repo_id, "--upstream", "--execute"])
             .current_dir(&workspace),
     );
+    let inspect_output = output(
+        Command::new(&binary)
+            .args(["inspect", repo_id])
+            .current_dir(&workspace),
+    );
+    assert!(inspect_output.contains("buildable: true"));
+    assert!(inspect_output.contains("upstream_tests_pass: true"));
 }
