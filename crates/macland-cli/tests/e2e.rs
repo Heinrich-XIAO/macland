@@ -76,6 +76,23 @@ fn create_git_fixture(fixture_root: &Path, source_repo: &Path) {
     );
 }
 
+fn commit_all(repo: &Path, message: &str) {
+    run(Command::new("git").args(["add", "."]).current_dir(repo));
+    run(
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=macland",
+                "-c",
+                "user.email=macland@example.invalid",
+                "commit",
+                "-m",
+                message,
+            ])
+            .current_dir(repo),
+    );
+}
+
 #[test]
 fn cli_exercises_repo_workflow() {
     let workspace = unique_temp_dir("workspace");
@@ -350,4 +367,59 @@ fn cli_autodetects_meson_repo_workflow() {
     );
     assert!(inspect_output.contains("buildable: true"));
     assert!(inspect_output.contains("upstream_tests_pass: true"));
+}
+
+#[test]
+fn repo_sync_initializes_recursive_submodules() {
+    let workspace = unique_temp_dir("submodule-workspace");
+    let parent_repo = unique_temp_dir("submodule-parent");
+    let child_repo = unique_temp_dir("submodule-child");
+
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&parent_repo).unwrap();
+    fs::create_dir_all(&child_repo).unwrap();
+
+    fs::write(child_repo.join("README.md"), "child\n").unwrap();
+    run(Command::new("git").args(["init", "-b", "main"]).current_dir(&child_repo));
+    commit_all(&child_repo, "child");
+
+    fs::write(parent_repo.join("README.md"), "parent\n").unwrap();
+    run(Command::new("git").args(["init", "-b", "main"]).current_dir(&parent_repo));
+    run(
+        Command::new("git")
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                child_repo.to_str().unwrap(),
+                "vendor/child",
+            ])
+            .current_dir(&parent_repo),
+    );
+    commit_all(&parent_repo, "parent");
+
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let repo_url = parent_repo.display().to_string();
+    let repo_id = parent_repo.file_name().unwrap().to_str().unwrap();
+
+    run(
+        Command::new(&binary)
+            .args(["repo", "add", &repo_url, "--rev", "main"])
+            .current_dir(&workspace),
+    );
+    run(
+        Command::new(&binary)
+            .args(["repo", "sync", repo_id])
+            .current_dir(&workspace),
+    );
+
+    assert!(workspace
+        .join("repos")
+        .join(repo_id)
+        .join("source")
+        .join("vendor")
+        .join("child")
+        .join("README.md")
+        .exists());
 }

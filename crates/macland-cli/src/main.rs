@@ -106,14 +106,11 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
             let spec = workspace.load_repo_spec(repo_id)?;
             let source_root = workspace.source_root(&spec);
             if source_root.join(".git").exists() {
-                let status = Command::new("git")
-                    .args(["pull", "--ff-only"])
-                    .current_dir(&source_root)
-                    .status()
-                    .map_err(|err| err.to_string())?;
-                if !status.success() {
-                    return Err(format!("git pull failed with status {status}"));
+                run_git(&source_root, ["fetch", "--all", "--tags"])?;
+                if let Some(ref rev) = spec.rev {
+                    run_git(&source_root, ["checkout", rev.as_str()])?;
                 }
+                run_git(&source_root, ["pull", "--ff-only"])?;
             } else {
                 let status = Command::new("git")
                     .args(["clone", &spec.url, source_root.to_string_lossy().as_ref()])
@@ -123,16 +120,10 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
                     return Err(format!("git clone failed with status {status}"));
                 }
                 if let Some(ref rev) = spec.rev {
-                    let status = Command::new("git")
-                        .args(["checkout", rev])
-                        .current_dir(&source_root)
-                        .status()
-                        .map_err(|err| err.to_string())?;
-                    if !status.success() {
-                        return Err(format!("git checkout failed with status {status}"));
-                    }
+                    run_git(&source_root, ["checkout", rev.as_str()])?;
                 }
             }
+            sync_git_submodules(&source_root)?;
             maybe_autodetect_manifest(workspace, &spec, &source_root)?;
             println!("synced repo: {repo_id}");
             Ok(())
@@ -410,6 +401,43 @@ fn run_bootstrap(execute: bool) -> Result<(), String> {
         println!("bootstrap_status: success");
     }
     Ok(())
+}
+
+fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<(), String> {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .status()
+        .map_err(|err| err.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("git {} failed with status {status}", args.join(" ")))
+    }
+}
+
+fn sync_git_submodules(source_root: &Path) -> Result<(), String> {
+    if !source_root.join(".gitmodules").exists() {
+        return Ok(());
+    }
+
+    let status = Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+        ])
+        .current_dir(source_root)
+        .status()
+        .map_err(|err| err.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("git submodule update failed with status {status}"))
+    }
 }
 
 fn maybe_autodetect_manifest(
