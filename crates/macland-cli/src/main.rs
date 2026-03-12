@@ -402,6 +402,7 @@ fn run_bootstrap(execute: bool) -> Result<(), String> {
     }
 
     println!("bootstrap_packages: {}", plan.packages.join(" "));
+    println!("bootstrap_workspace_shims: {}", plan.workspace_shims.join(" "));
     if execute {
         execute_bootstrap(&plan)?;
         println!("bootstrap_status: success");

@@ -10,3 +10,4 @@ pub mod repo;
 pub mod report;
 pub mod runner;
 pub mod shim;
+pub mod workspace_shims;

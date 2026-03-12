@@ -67,6 +67,10 @@ impl DoctorReport {
             "xcursor",
             "re2",
             "muparser",
+            "libdrm",
+            "gbm",
+            "libinput",
+            "libudev",
         ];
         let native_dependencies = native_dependency_names
             .into_iter()
