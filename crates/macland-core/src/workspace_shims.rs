@@ -106,10 +106,17 @@ static inline char* drmGetFormatModifierName(uint64_t modifier) {
         r#"#ifndef XF86DRMMODE_H
 #define XF86DRMMODE_H
 
+#include <errno.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 #define DRM_DISPLAY_MODE_LEN 32
 #define DRM_MODE_CONTENT_TYPE_GRAPHICS 0
+#define DRM_PROP_NAME_LEN 32
+#define DRM_PLANE_TYPE_OVERLAY 0
+#define DRM_PLANE_TYPE_PRIMARY 1
+#define DRM_PLANE_TYPE_CURSOR 2
 
 typedef struct _drmModeModeInfo {
     uint32_t clock;
@@ -128,6 +135,54 @@ typedef struct _drmModeModeInfo {
     uint32_t type;
     char name[DRM_DISPLAY_MODE_LEN];
 } drmModeModeInfo;
+
+typedef struct _drmModeAtomicReq {
+    int cursor;
+} drmModeAtomicReq;
+
+typedef struct _drmModeFB2 {
+    uint32_t fb_id;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixel_format;
+    uint64_t modifier;
+    uint32_t handles[4];
+    uint32_t pitches[4];
+    uint32_t offsets[4];
+} drmModeFB2;
+
+typedef struct _drmModeRes {
+    int count_fbs;
+    int count_crtcs;
+    int count_connectors;
+    int count_encoders;
+    uint32_t* fbs;
+    uint32_t* crtcs;
+    uint32_t* connectors;
+    uint32_t* encoders;
+    uint32_t min_width;
+    uint32_t max_width;
+    uint32_t min_height;
+    uint32_t max_height;
+} drmModeRes;
+
+typedef struct _drmModePropertyRes {
+    uint32_t prop_id;
+    uint32_t flags;
+    char name[DRM_PROP_NAME_LEN];
+    int count_values;
+    uint64_t* values;
+    int count_enums;
+    void* enums;
+    int count_blobs;
+    uint32_t* blob_ids;
+} drmModePropertyRes;
+
+typedef struct _drmModePropertyBlobRes {
+    uint32_t id;
+    uint32_t length;
+    void* data;
+} drmModePropertyBlobRes;
 
 struct hdr_metadata_infoframe {
     uint8_t eotf;
@@ -152,6 +207,60 @@ typedef struct hdr_output_metadata {
         struct hdr_metadata_infoframe hdmi_metadata_type1;
     };
 } hdr_output_metadata;
+
+static inline drmModeAtomicReq* drmModeAtomicAlloc(void) {
+    return (drmModeAtomicReq*)calloc(1, sizeof(drmModeAtomicReq));
+}
+
+static inline void drmModeAtomicFree(drmModeAtomicReq* req) {
+    free(req);
+}
+
+static inline int drmModeAtomicAddProperty(drmModeAtomicReq* req, uint32_t object_id, uint32_t property_id, uint64_t value) {
+    (void)req;
+    (void)object_id;
+    (void)property_id;
+    (void)value;
+    return 0;
+}
+
+static inline int drmModeAtomicGetCursor(drmModeAtomicReq* req) {
+    return req ? req->cursor : 0;
+}
+
+static inline void drmModeAtomicSetCursor(drmModeAtomicReq* req, int cursor) {
+    if (req) {
+        req->cursor = cursor;
+    }
+}
+
+static inline drmModeRes* drmModeGetResources(int fd) {
+    (void)fd;
+    return (drmModeRes*)calloc(1, sizeof(drmModeRes));
+}
+
+static inline void drmModeFreeResources(drmModeRes* resources) {
+    free(resources);
+}
+
+static inline drmModeFB2* drmModeGetFB2(int fd, uint32_t fb_id) {
+    drmModeFB2* info = (drmModeFB2*)calloc(1, sizeof(drmModeFB2));
+    (void)fd;
+    if (info) {
+        info->fb_id = fb_id;
+    }
+    return info;
+}
+
+static inline void drmModeFreeFB2(drmModeFB2* fb) {
+    free(fb);
+}
+
+static inline int drmCloseBufferHandle(int fd, uint32_t handle) {
+    (void)fd;
+    (void)handle;
+    return 0;
+}
 
 #endif
 "#,
@@ -301,6 +410,27 @@ Description: macland compatibility shim for libseat discovery
 Version: 0.2.0
 Cflags: -I${includedir}
 Libs: -L${libdir} -lseat
+"#,
+    ),
+    (
+        "share/hwdata/pnp.ids",
+        r#"AAA	Fake Vendor
+ACR	Acer
+APP	Apple
+DEL	Dell
+SAM	Samsung
+"#,
+    ),
+    (
+        "lib/pkgconfig/hwdata.pc",
+        r#"prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+datarootdir=${prefix}/share
+pkgdatadir=${datarootdir}/hwdata
+
+Name: hwdata
+Description: macland compatibility shim for hwdata lookup
+Version: 0.0.1
 "#,
     ),
 ];

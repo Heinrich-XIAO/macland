@@ -83,8 +83,7 @@ pub fn execute_bootstrap(plan: &BootstrapPlan) -> Result<(), String> {
         }
     }
 
-    if !plan.workspace_shims.is_empty() {
-        let workspace_root = find_workspace_root().ok_or_else(|| "unable to locate workspace root".to_string())?;
+    if let Some(workspace_root) = find_workspace_root() {
         install_workspace_shims(&workspace_root)?;
     }
 

@@ -399,6 +399,10 @@ fn run_bootstrap(execute: bool) -> Result<(), String> {
     let plan = BootstrapPlan::from_doctor(&report);
     if plan.is_empty() {
         println!("bootstrap: no missing managed tools");
+        if execute {
+            execute_bootstrap(&plan)?;
+            println!("bootstrap_status: success");
+        }
         return Ok(());
     }
 
