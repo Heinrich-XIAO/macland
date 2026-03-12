@@ -136,6 +136,31 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
 fn print_doctor(report: DoctorReport) {
     println!("host.macos={}", report.host.macos);
     println!("host.apple_silicon={}", report.host.apple_silicon);
+    println!("backend.renderer={:?}", report.backend.renderer);
+    println!(
+        "backend.software_fallback={}",
+        report.backend.supports_software_fallback
+    );
+    println!(
+        "backend.fullscreen_host={}",
+        report.backend.supports_fullscreen_host
+    );
+    println!(
+        "backend.windowed_debug={}",
+        report.backend.supports_windowed_debug
+    );
+    println!(
+        "backend.single_display_session={}",
+        report.backend.supports_single_display_session
+    );
+    println!(
+        "backend.multi_display_session={}",
+        report.backend.supports_multi_display_session
+    );
+    println!(
+        "backend.permissions={}",
+        report.backend.permission_requirements.join(",")
+    );
     for tool in report.tools {
         println!("tool.{}={} ({})", tool.name, tool.found, tool.detail);
     }

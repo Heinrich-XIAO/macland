@@ -59,6 +59,7 @@ pub fn execute_bootstrap(plan: &BootstrapPlan) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::BootstrapPlan;
+    use crate::backend::BackendCapabilities;
     use crate::doctor::{DoctorReport, HostStatus, ToolStatus};
 
     #[test]
@@ -80,6 +81,7 @@ mod tests {
                 apple_silicon: true,
                 macos: true,
             },
+            backend: BackendCapabilities::macos_defaults(),
         };
 
         let plan = BootstrapPlan::from_doctor(&report);

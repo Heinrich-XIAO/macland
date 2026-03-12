@@ -6,6 +6,7 @@ This repository currently contains:
 
 - a Swift host shell for fullscreen or debug-windowed presentation
 - a Rust control plane and CLI for repo management, build/test/run orchestration, and diagnostics
+- a backend model for macOS session/output/input capabilities and mock runtime testing
 - a shared `macland.toml` adapter format
 - unit tests for the Rust orchestration layer and Swift host configuration
 
@@ -31,4 +32,3 @@ cargo test
 cargo run -p macland-cli -- doctor
 swift run macland-host --windowed-debug
 ```
-

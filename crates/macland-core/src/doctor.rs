@@ -1,3 +1,4 @@
+use crate::backend::BackendCapabilities;
 use std::env;
 use std::path::PathBuf;
 
@@ -12,6 +13,7 @@ pub struct ToolStatus {
 pub struct DoctorReport {
     pub tools: Vec<ToolStatus>,
     pub host: HostStatus,
+    pub backend: BackendCapabilities,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +47,7 @@ impl DoctorReport {
                 apple_silicon: env::consts::ARCH == "aarch64",
                 macos: env::consts::OS == "macos",
             },
+            backend: BackendCapabilities::macos_defaults(),
         }
     }
 
@@ -72,6 +75,6 @@ mod tests {
     fn gathers_report() {
         let report = DoctorReport::gather();
         assert!(report.tools.iter().any(|tool| tool.name == "swift"));
+        assert!(report.backend.supports_fullscreen_host);
     }
 }
-
