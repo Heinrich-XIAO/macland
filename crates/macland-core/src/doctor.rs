@@ -58,6 +58,15 @@ impl DoctorReport {
             "pixman-1",
             "egl",
             "glesv2",
+            "epoll-shim",
+            "libzip",
+            "tomlplusplus",
+            "libmagic",
+            "libheif",
+            "pugixml",
+            "xcursor",
+            "re2",
+            "muparser",
         ];
         let native_dependencies = native_dependency_names
             .into_iter()
@@ -134,15 +143,27 @@ fn merged_pkg_config_path() -> Option<String> {
     }
 
     for candidate in [
+        ".macland/sysroot/lib/pkgconfig",
+        ".macland/sysroot/share/pkgconfig",
         "/opt/homebrew/lib/pkgconfig",
         "/opt/homebrew/share/pkgconfig",
+        "/opt/homebrew/opt/epoll-shim/lib/pkgconfig",
+        "/opt/homebrew/opt/jpeg/lib/pkgconfig",
         "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
         "/opt/homebrew/opt/mesa/lib/pkgconfig",
         "/usr/local/lib/pkgconfig",
         "/usr/local/share/pkgconfig",
     ] {
-        if std::path::Path::new(candidate).exists() && !paths.iter().any(|path| path == candidate) {
-            paths.push(candidate.to_string());
+        let resolved = if candidate.starts_with('.') {
+            find_workspace_root().map(|root| root.join(candidate))
+        } else {
+            Some(std::path::PathBuf::from(candidate))
+        };
+        if let Some(path) = resolved {
+            let value = path.display().to_string();
+            if path.exists() && !paths.iter().any(|existing| existing == &value) {
+                paths.push(value);
+            }
         }
     }
 
@@ -150,6 +171,18 @@ fn merged_pkg_config_path() -> Option<String> {
         None
     } else {
         Some(paths.join(":"))
+    }
+}
+
+fn find_workspace_root() -> Option<PathBuf> {
+    let mut current = env::current_dir().ok()?;
+    loop {
+        if current.join("Cargo.toml").exists() && current.join("Package.swift").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
     }
 }
 

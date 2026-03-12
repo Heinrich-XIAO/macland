@@ -120,6 +120,8 @@ fn merged_pkg_config_path(override_value: Option<&String>) -> Option<String> {
         ".macland/sysroot/share/pkgconfig",
         "/opt/homebrew/lib/pkgconfig",
         "/opt/homebrew/share/pkgconfig",
+        "/opt/homebrew/opt/epoll-shim/lib/pkgconfig",
+        "/opt/homebrew/opt/jpeg/lib/pkgconfig",
         "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
         "/opt/homebrew/opt/mesa/lib/pkgconfig",
         "/usr/local/lib/pkgconfig",
@@ -151,6 +153,8 @@ fn merged_include_path(override_value: Option<&String>) -> Option<String> {
         &[
             ".macland/sysroot/include",
             "/opt/homebrew/include",
+            "/opt/homebrew/opt/epoll-shim/include",
+            "/opt/homebrew/opt/jpeg/include",
             "/opt/homebrew/opt/libxkbcommon/include",
             "/opt/homebrew/opt/mesa/include",
             "/usr/local/include",
@@ -167,6 +171,8 @@ fn merged_library_path(override_value: Option<&String>) -> Option<String> {
         &[
             ".macland/sysroot/lib",
             "/opt/homebrew/lib",
+            "/opt/homebrew/opt/epoll-shim/lib",
+            "/opt/homebrew/opt/jpeg/lib",
             "/opt/homebrew/opt/libxkbcommon/lib",
             "/opt/homebrew/opt/mesa/lib",
             "/usr/local/lib",

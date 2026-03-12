@@ -27,6 +27,15 @@ impl BootstrapPlan {
             let package = match dependency {
                 "xkbcommon" => Some("libxkbcommon"),
                 "egl" | "glesv2" => Some("mesa"),
+                "epoll-shim" => Some("epoll-shim"),
+                "libzip" => Some("libzip"),
+                "tomlplusplus" => Some("tomlplusplus"),
+                "libmagic" => Some("libmagic"),
+                "libheif" => Some("libheif"),
+                "pugixml" => Some("pugixml"),
+                "xcursor" => Some("libxcursor"),
+                "re2" => Some("re2"),
+                "muparser" => Some("muparser"),
                 _ => None,
             };
             if let Some(package) = package {
