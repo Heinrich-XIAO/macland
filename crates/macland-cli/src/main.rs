@@ -157,6 +157,7 @@ fn print_doctor(report: DoctorReport) {
         "backend.multi_display_session={}",
         report.backend.supports_multi_display_session
     );
+    println!("backend.c_abi={}", report.backend.supports_c_abi);
     println!(
         "backend.permissions={}",
         report.backend.permission_requirements.join(",")

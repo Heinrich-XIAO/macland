@@ -9,6 +9,7 @@ pub struct BackendCapabilities {
     pub supports_windowed_debug: bool,
     pub supports_single_display_session: bool,
     pub supports_multi_display_session: bool,
+    pub supports_c_abi: bool,
     pub permission_requirements: Vec<String>,
 }
 
@@ -21,6 +22,7 @@ impl BackendCapabilities {
             supports_windowed_debug: true,
             supports_single_display_session: true,
             supports_multi_display_session: false,
+            supports_c_abi: false,
             permission_requirements: vec![
                 "accessibility".to_string(),
                 "input-monitoring".to_string(),

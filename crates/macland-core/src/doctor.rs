@@ -1,4 +1,5 @@
 use crate::backend::BackendCapabilities;
+use crate::backend_ffi::sdk_capabilities;
 use std::env;
 use std::path::PathBuf;
 
@@ -47,7 +48,7 @@ impl DoctorReport {
                 apple_silicon: env::consts::ARCH == "aarch64",
                 macos: env::consts::OS == "macos",
             },
-            backend: BackendCapabilities::macos_defaults(),
+            backend: sdk_capabilities(),
         }
     }
 

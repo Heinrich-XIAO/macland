@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod backend;
+pub mod backend_ffi;
 pub mod bootstrap;
 pub mod conformance;
 pub mod detect;
