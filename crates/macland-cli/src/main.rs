@@ -7,6 +7,7 @@ use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
 use macland_core::report::{ActionRecord, SupportReport, SupportTier, load_action_record, write_action_record};
 use macland_core::runner::{execute_recorded_command_line, inspect_manifest, CommandPlan};
+use macland_core::shim::assess_manifest;
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -42,12 +43,18 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .load_repo_spec(repo_id)
                 .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
             let report = inspect_repo(&workspace, &spec, &manifest);
+            let shim = assess_manifest(&manifest, &DoctorReport::gather().backend);
             println!("repo: {}", manifest.id);
             println!("buildable: {}", report.buildable);
             println!("upstream_tests_pass: {}", report.upstream_tests_pass);
             println!("conformance_pass: {}", report.conformance_pass);
             println!("fullscreen_run_pass: {}", report.fullscreen_run_pass);
             println!("tier: {:?}", report.tier);
+            println!("shim.family: {:?}", shim.family);
+            println!("shim.status: {}", shim.summary());
+            println!("shim.missing_sdk_features: {}", shim.missing_sdk_features.join(","));
+            println!("shim.missing_protocols: {}", shim.missing_protocols.join(","));
+            println!("shim.missing_backend_flags: {}", shim.missing_backend_flags.join(","));
             Ok(())
         }
         "build" => {
