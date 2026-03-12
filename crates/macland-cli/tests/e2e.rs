@@ -278,3 +278,76 @@ fn cli_autodetects_cmake_repo_workflow() {
     assert!(inspect_output.contains("buildable: true"));
     assert!(inspect_output.contains("upstream_tests_pass: true"));
 }
+
+#[test]
+fn cli_autodetects_meson_repo_workflow() {
+    let workspace = unique_temp_dir("meson-workspace");
+    let source_repo = unique_temp_dir("meson-source");
+    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fixtures")
+        .join("meson-compositor-template");
+
+    create_git_fixture(&fixture_root, &source_repo);
+    fs::create_dir_all(&workspace).unwrap();
+
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let repo_url = source_repo.display().to_string();
+    let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
+
+    run(
+        Command::new(&binary)
+            .args(["repo", "add", &repo_url, "--rev", "main"])
+            .current_dir(&workspace),
+    );
+    run(
+        Command::new(&binary)
+            .args(["repo", "sync", repo_id])
+            .current_dir(&workspace),
+    );
+
+    let manifest = fs::read_to_string(
+        workspace
+            .join("repos")
+            .join(repo_id)
+            .join("macland.toml"),
+    )
+    .unwrap();
+    assert!(manifest.contains("build_system = \"meson\""));
+    assert!(manifest.contains("entrypoint = [\"./build/demo-meson-compositor\"]"));
+
+    run(
+        Command::new(&binary)
+            .args(["build", repo_id, "--execute"])
+            .current_dir(&workspace),
+    );
+    run(
+        Command::new(&binary)
+            .args(["test", repo_id, "--upstream", "--execute"])
+            .current_dir(&workspace),
+    );
+
+    let host_stub = workspace.join("host-stub.sh");
+    write_host_stub(&host_stub);
+    run(
+        Command::new(&binary)
+            .args([
+                "run",
+                repo_id,
+                "--windowed-debug",
+                "--execute",
+            ])
+            .env("MACLAND_HOST_BINARY", &host_stub)
+            .current_dir(&workspace),
+    );
+
+    let inspect_output = output(
+        Command::new(&binary)
+            .args(["inspect", repo_id])
+            .env("MACLAND_HOST_BINARY", &host_stub)
+            .current_dir(&workspace),
+    );
+    assert!(inspect_output.contains("buildable: true"));
+    assert!(inspect_output.contains("upstream_tests_pass: true"));
+}

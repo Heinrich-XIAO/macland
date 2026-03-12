@@ -8,6 +8,9 @@ pub fn autodetect_manifest(id: &str, repo: &str, rev: &str, source_root: &Path) 
         return Some(cargo_manifest(id, repo, rev, source_root));
     }
     if source_root.join("meson.build").exists() {
+        let entrypoint = read_meson_project_name(&source_root.join("meson.build"))
+            .map(|name| vec![format!("./build/{name}")])
+            .unwrap_or_default();
         return Some(AdapterManifest {
             id: id.to_string(),
             repo: repo.to_string(),
@@ -16,7 +19,7 @@ pub fn autodetect_manifest(id: &str, repo: &str, rev: &str, source_root: &Path) 
             configure: vec!["meson".to_string(), "setup".to_string(), "build".to_string()],
             build: vec!["meson".to_string(), "compile".to_string(), "-C".to_string(), "build".to_string()],
             test: vec!["meson".to_string(), "test".to_string(), "-C".to_string(), "build".to_string()],
-            entrypoint: Vec::new(),
+            entrypoint,
             env: BTreeMap::new(),
             sdk_features: vec!["metal-fast-path".to_string()],
             protocol_expectations: vec!["xdg-shell".to_string()],
@@ -108,6 +111,20 @@ fn read_cargo_package_name(path: &Path) -> Option<String> {
     None
 }
 
+fn read_meson_project_name(path: &Path) -> Option<String> {
+    let contents = fs::read_to_string(path).ok()?;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("project(") {
+            continue;
+        }
+        let after_open = trimmed.strip_prefix("project(")?;
+        let first_arg = after_open.split(',').next()?.trim();
+        return Some(first_arg.trim_matches('\'').trim_matches('"').to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::autodetect_manifest;
@@ -135,5 +152,20 @@ mod tests {
                 "demo-compositor".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn detects_meson_repo() {
+        let root = std::env::temp_dir().join(format!("macland-detect-meson-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("meson.build"),
+            "project('meson-compositor', 'c')\n",
+        )
+        .unwrap();
+        let manifest = autodetect_manifest("demo", "https://example.com", "main", &root).unwrap();
+        assert_eq!(manifest.build_system, BuildSystem::Meson);
+        assert_eq!(manifest.entrypoint, vec!["./build/meson-compositor".to_string()]);
     }
 }
