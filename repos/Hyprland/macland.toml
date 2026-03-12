@@ -1,0 +1,13 @@
+id = "Hyprland"
+repo = "https://github.com/hyprwm/Hyprland.git"
+rev = "main"
+build_system = "cmake"
+configure = ["cmake", "-S", ".", "-B", "build"]
+build = ["cmake", "--build", "build"]
+test = ["ctest", "--test-dir", "build"]
+entrypoint = ["./build/Hyprland"]
+patch_policy = "prefer-none"
+sdk_features = ["metal-fast-path"]
+protocol_expectations = ["xdg-shell"]
+
+[env]

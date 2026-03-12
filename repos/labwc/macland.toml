@@ -1,0 +1,13 @@
+id = "labwc"
+repo = "https://github.com/labwc/labwc.git"
+rev = "master"
+build_system = "meson"
+configure = ["meson", "setup", "build"]
+build = ["meson", "compile", "-C", "build"]
+test = ["meson", "test", "-C", "build"]
+entrypoint = ["./build/labwc"]
+patch_policy = "prefer-none"
+sdk_features = ["metal-fast-path"]
+protocol_expectations = ["xdg-shell"]
+
+[env]
