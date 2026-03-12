@@ -1,4 +1,6 @@
 use macland_core::adapter::AdapterManifest;
+use macland_core::bootstrap::{execute_bootstrap, BootstrapPlan};
+use macland_core::conformance::run_conformance;
 use macland_core::doctor::DoctorReport;
 use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
@@ -25,6 +27,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             print_doctor(DoctorReport::gather());
             Ok(())
         }
+        "bootstrap" => {
+            let execute = args.iter().any(|arg| arg == "--execute");
+            run_bootstrap(execute)
+        }
         "repo" => handle_repo(&workspace, &args[2..]),
         "inspect" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
@@ -44,7 +50,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         "test" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
-            run_action("test", &workspace, repo_id, args.iter().any(|arg| arg == "--execute"))
+            run_test_action(&workspace, repo_id, &args[3..], args.iter().any(|arg| arg == "--execute"))
         }
         "run" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
@@ -168,6 +174,60 @@ fn run_action(
     Ok(())
 }
 
+fn run_test_action(
+    workspace: &RepoWorkspace,
+    repo_id: &str,
+    args: &[String],
+    execute: bool,
+) -> Result<(), String> {
+    let manifest = load_manifest(workspace, repo_id)?;
+    let plan = CommandPlan::for_manifest(&manifest);
+    let spec = workspace
+        .load_repo_spec(repo_id)
+        .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
+    let source_root = workspace.source_root(&spec);
+    let run_upstream = !args.iter().any(|arg| arg == "--conformance") || args.iter().any(|arg| arg == "--upstream");
+    let run_conformance_checks = !args.iter().any(|arg| arg == "--upstream") || args.iter().any(|arg| arg == "--conformance");
+
+    println!("repo: {}", manifest.id);
+    println!("action: test");
+    println!("cwd: {}", source_root.display());
+    println!("upstream_command: {}", plan.test.join(" "));
+    println!("run_upstream: {}", run_upstream);
+    println!("run_conformance: {}", run_conformance_checks);
+
+    if execute && run_upstream {
+        execute_command_line(&source_root, &plan.test, &manifest.env)?;
+        println!("upstream_status: success");
+    }
+
+    if run_conformance_checks {
+        let host_binary = locate_host_binary(workspace.root())?;
+        let report = if execute {
+            run_conformance(
+                &host_binary,
+                &manifest,
+                &source_root,
+                &workspace.artifacts_root(&spec).join("conformance"),
+                HostSessionMode::WindowedDebug,
+            )?
+        } else {
+            let artifacts = create_launch_request(
+                &manifest,
+                &source_root,
+                HostSessionMode::WindowedDebug,
+                &workspace.artifacts_root(&spec).join("conformance"),
+            )?;
+            println!("conformance_launch_request: {}", artifacts.request_path.display());
+            return Ok(());
+        };
+        println!("conformance_status_file: {}", report.status_file.display());
+        println!("conformance_passed: {}", report.passed());
+    }
+
+    Ok(())
+}
+
 fn run_run_action(
     workspace: &RepoWorkspace,
     repo_id: &str,
@@ -190,7 +250,7 @@ fn run_run_action(
         mode,
         &workspace.artifacts_root(&spec).join("run"),
     )?;
-    let host_binary = locate_host_binary(workspace.root());
+    let host_binary = locate_host_binary(workspace.root())?;
 
     println!("repo: {}", manifest.id);
     println!("action: run");
@@ -217,19 +277,39 @@ fn infer_repo_id(url: &str) -> String {
 fn print_help() {
     println!("macland-cli commands:");
     println!("  doctor");
+    println!("  bootstrap [--execute]");
     println!("  repo add <git-url> [--rev <commit>]");
     println!("  repo sync <repo-id>");
     println!("  inspect <repo-id>");
     println!("  build <repo-id> [--execute]");
-    println!("  test <repo-id> [--execute]");
+    println!("  test <repo-id> [--upstream|--conformance] [--execute]");
     println!("  run <repo-id> [--fullscreen|--windowed-debug] [--execute]");
 }
 
-fn locate_host_binary(workspace_root: &Path) -> PathBuf {
+fn locate_host_binary(workspace_root: &Path) -> Result<PathBuf, String> {
+    if let Ok(path) = env::var("MACLAND_HOST_BINARY") {
+        return Ok(PathBuf::from(path));
+    }
     let debug_binary = workspace_root.join(".build").join("debug").join("macland-host");
     if debug_binary.exists() {
-        debug_binary
+        Ok(debug_binary)
     } else {
-        PathBuf::from("swift")
+        Err("macland-host binary is missing; run `swift build` first or set MACLAND_HOST_BINARY".to_string())
     }
+}
+
+fn run_bootstrap(execute: bool) -> Result<(), String> {
+    let report = DoctorReport::gather();
+    let plan = BootstrapPlan::from_doctor(&report);
+    if plan.is_empty() {
+        println!("bootstrap: no missing managed tools");
+        return Ok(());
+    }
+
+    println!("bootstrap_packages: {}", plan.packages.join(" "));
+    if execute {
+        execute_bootstrap(&plan)?;
+        println!("bootstrap_status: success");
+    }
+    Ok(())
 }
