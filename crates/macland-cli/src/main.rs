@@ -160,14 +160,17 @@ fn run_action(
     let reports_root = workspace.artifacts_root(&spec).join("reports");
 
     let line = match action {
-        "build" => plan.build,
-        "test" => plan.test,
-        "run" => plan.run,
+        "build" => plan.build.clone(),
+        "test" => plan.test.clone(),
+        "run" => plan.run.clone(),
         _ => Vec::new(),
     };
 
     println!("repo: {}", manifest.id);
     println!("action: {action}");
+    if action == "build" && !plan.configure.is_empty() {
+        println!("configure_command: {}", plan.configure.join(" "));
+    }
     println!("command: {}", line.join(" "));
     println!("cwd: {}", repo_root.display());
     println!(
@@ -175,6 +178,16 @@ fn run_action(
         CommandPlan::upstream_test_hint(manifest.build_system)
     );
     if execute {
+        if action == "build" && !plan.configure.is_empty() {
+            execute_recorded_command_line(
+                "configure",
+                &repo_root,
+                &plan.configure,
+                &manifest.env,
+                &reports_root,
+            )?;
+            println!("configure_status: success");
+        }
         execute_recorded_command_line(action, &repo_root, &line, &manifest.env, &reports_root)?;
         println!("status: success");
     }
