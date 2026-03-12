@@ -71,6 +71,7 @@ impl DoctorReport {
             "gbm",
             "libinput",
             "libudev",
+            "libseat",
         ];
         let native_dependencies = native_dependency_names
             .into_iter()

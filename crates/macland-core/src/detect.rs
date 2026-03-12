@@ -5,13 +5,13 @@ use std::path::Path;
 
 pub fn autodetect_manifest(id: &str, repo: &str, rev: &str, source_root: &Path) -> Option<AdapterManifest> {
     if source_root.join("Cargo.toml").exists() {
-        return Some(cargo_manifest(id, repo, rev, source_root));
+        return Some(apply_known_overrides(cargo_manifest(id, repo, rev, source_root)));
     }
     if source_root.join("meson.build").exists() {
         let entrypoint = read_meson_project_name(&source_root.join("meson.build"))
             .map(|name| vec![format!("./build/{name}")])
             .unwrap_or_default();
-        return Some(AdapterManifest {
+        return Some(apply_known_overrides(AdapterManifest {
             id: id.to_string(),
             repo: repo.to_string(),
             rev: rev.to_string(),
@@ -24,10 +24,10 @@ pub fn autodetect_manifest(id: &str, repo: &str, rev: &str, source_root: &Path) 
             sdk_features: vec!["metal-fast-path".to_string()],
             protocol_expectations: vec!["xdg-shell".to_string()],
             patch_policy: "prefer-none".to_string(),
-        });
+        }));
     }
     if source_root.join("CMakeLists.txt").exists() {
-        return Some(AdapterManifest {
+        return Some(apply_known_overrides(AdapterManifest {
             id: id.to_string(),
             repo: repo.to_string(),
             rev: rev.to_string(),
@@ -46,10 +46,10 @@ pub fn autodetect_manifest(id: &str, repo: &str, rev: &str, source_root: &Path) 
             sdk_features: vec!["metal-fast-path".to_string()],
             protocol_expectations: vec!["xdg-shell".to_string()],
             patch_policy: "prefer-none".to_string(),
-        });
+        }));
     }
     if source_root.join("Makefile").exists() {
-        return Some(AdapterManifest {
+        return Some(apply_known_overrides(AdapterManifest {
             id: id.to_string(),
             repo: repo.to_string(),
             rev: rev.to_string(),
@@ -62,7 +62,7 @@ pub fn autodetect_manifest(id: &str, repo: &str, rev: &str, source_root: &Path) 
             sdk_features: vec!["metal-fast-path".to_string()],
             protocol_expectations: vec!["xdg-shell".to_string()],
             patch_policy: "prefer-none".to_string(),
-        });
+        }));
     }
     None
 }
@@ -125,6 +125,23 @@ fn read_meson_project_name(path: &Path) -> Option<String> {
     None
 }
 
+fn apply_known_overrides(mut manifest: AdapterManifest) -> AdapterManifest {
+    let id_lower = manifest.id.to_ascii_lowercase();
+    let repo_lower = manifest.repo.to_ascii_lowercase();
+
+    if manifest.build_system == BuildSystem::CMake
+        && (id_lower == "hyprland" || repo_lower.contains("hyprland"))
+    {
+        for flag in ["-DNO_XWAYLAND=ON", "-DNO_SYSTEMD=ON", "-DNO_UWSM=ON"] {
+            if !manifest.configure.iter().any(|entry| entry == flag) {
+                manifest.configure.push(flag.to_string());
+            }
+        }
+    }
+
+    manifest
+}
+
 #[cfg(test)]
 mod tests {
     use super::autodetect_manifest;
@@ -167,5 +184,18 @@ mod tests {
         let manifest = autodetect_manifest("demo", "https://example.com", "main", &root).unwrap();
         assert_eq!(manifest.build_system, BuildSystem::Meson);
         assert_eq!(manifest.entrypoint, vec!["./build/meson-compositor".to_string()]);
+    }
+
+    #[test]
+    fn applies_hyprland_overrides() {
+        let root = std::env::temp_dir().join(format!("macland-detect-cmake-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.20)\n").unwrap();
+
+        let manifest = autodetect_manifest("Hyprland", "https://github.com/hyprwm/Hyprland.git", "main", &root).unwrap();
+        assert!(manifest.configure.iter().any(|value| value == "-DNO_XWAYLAND=ON"));
+        assert!(manifest.configure.iter().any(|value| value == "-DNO_SYSTEMD=ON"));
+        assert!(manifest.configure.iter().any(|value| value == "-DNO_UWSM=ON"));
     }
 }

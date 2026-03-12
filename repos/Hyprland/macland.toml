@@ -2,7 +2,7 @@ id = "Hyprland"
 repo = "https://github.com/hyprwm/Hyprland.git"
 rev = "main"
 build_system = "cmake"
-configure = ["cmake", "-S", ".", "-B", "build", "-DOPENGL_GLES2_INCLUDE_DIR=/opt/homebrew/opt/mesa/include", "-DOPENGL_GLES3_INCLUDE_DIR=/opt/homebrew/opt/mesa/include", "-DOPENGL_EGL_INCLUDE_DIR=/opt/homebrew/opt/mesa/include", "-DOPENGL_gles2_LIBRARY=/opt/homebrew/opt/mesa/lib/libGLESv2.dylib", "-DOPENGL_gles3_LIBRARY=/opt/homebrew/opt/mesa/lib/libGLESv2.dylib", "-DOPENGL_egl_LIBRARY=/opt/homebrew/opt/mesa/lib/libEGL.dylib"]
+configure = ["cmake", "-S", ".", "-B", "build", "-DOPENGL_GLES2_INCLUDE_DIR=/opt/homebrew/opt/mesa/include", "-DOPENGL_GLES3_INCLUDE_DIR=/opt/homebrew/opt/mesa/include", "-DOPENGL_EGL_INCLUDE_DIR=/opt/homebrew/opt/mesa/include", "-DOPENGL_gles2_LIBRARY=/opt/homebrew/opt/mesa/lib/libGLESv2.dylib", "-DOPENGL_gles3_LIBRARY=/opt/homebrew/opt/mesa/lib/libGLESv2.dylib", "-DOPENGL_egl_LIBRARY=/opt/homebrew/opt/mesa/lib/libEGL.dylib", "-DNO_XWAYLAND=ON", "-DNO_SYSTEMD=ON", "-DNO_UWSM=ON"]
 build = ["cmake", "--build", "build"]
 test = ["ctest", "--test-dir", "build"]
 entrypoint = ["./build/Hyprland"]

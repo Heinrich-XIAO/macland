@@ -124,6 +124,7 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
                 }
             }
             sync_git_submodules(&source_root)?;
+            ensure_wlroots_subproject(&source_root)?;
             maybe_autodetect_manifest(workspace, &spec, &source_root)?;
             println!("synced repo: {repo_id}");
             Ok(())
@@ -447,6 +448,106 @@ fn sync_git_submodules(source_root: &Path) -> Result<(), String> {
     }
 }
 
+fn ensure_wlroots_subproject(source_root: &Path) -> Result<(), String> {
+    let meson_build = source_root.join("meson.build");
+    if !meson_build.exists() {
+        return Ok(());
+    }
+
+    let contents = fs::read_to_string(&meson_build).map_err(|err| err.to_string())?;
+    if !contents.contains("wlroots") {
+        return Ok(());
+    }
+
+    let wlroots_root = source_root.join("subprojects").join("wlroots");
+    if wlroots_root.exists() {
+        return Ok(());
+    }
+
+    let requested_series = detect_wlroots_series(&contents).unwrap_or_else(|| "0.20".to_string());
+    let reference = resolve_wlroots_ref(&requested_series)?;
+
+    fs::create_dir_all(
+        wlroots_root
+            .parent()
+            .ok_or_else(|| "invalid wlroots subproject path".to_string())?,
+    )
+    .map_err(|err| err.to_string())?;
+
+    let status = Command::new("git")
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            &reference,
+            "https://gitlab.freedesktop.org/wlroots/wlroots.git",
+            wlroots_root.to_string_lossy().as_ref(),
+        ])
+        .status()
+        .map_err(|err| err.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("wlroots clone failed with status {status}"))
+    }
+}
+
+fn detect_wlroots_series(contents: &str) -> Option<String> {
+    for marker in ["wlroots-0.", ">=0."] {
+        if let Some(index) = contents.find(marker) {
+            let suffix = &contents[index + marker.len()..];
+            let mut digits = String::new();
+            for character in suffix.chars() {
+                if character.is_ascii_digit() || character == '.' {
+                    digits.push(character);
+                } else {
+                    break;
+                }
+            }
+            if marker == "wlroots-0." {
+                if !digits.is_empty() {
+                    return Some(format!("0.{digits}"));
+                }
+            } else if !digits.is_empty() {
+                if let Some(minor) = digits.split('.').next() {
+                    return Some(format!("0.{minor}"));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn resolve_wlroots_ref(series: &str) -> Result<String, String> {
+    let output = Command::new("git")
+        .args([
+            "ls-remote",
+            "--tags",
+            "--refs",
+            "https://gitlab.freedesktop.org/wlroots/wlroots.git",
+            &format!("refs/tags/{series}*"),
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        return Err(format!("failed to resolve wlroots refs for {series}"));
+    }
+
+    let mut refs = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split('\t').nth(1))
+        .filter_map(|reference| reference.rsplit('/').next())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    refs.sort();
+    refs
+        .into_iter()
+        .rev()
+        .find(|reference| reference.starts_with(series))
+        .ok_or_else(|| format!("no wlroots tag found for {series}"))
+}
+
 fn maybe_autodetect_manifest(
     workspace: &RepoWorkspace,
     spec: &RepoSpec,
@@ -514,6 +615,27 @@ fn format_build_system(system: macland_core::adapter::BuildSystem) -> &'static s
 #[derive(Debug, Deserialize)]
 struct PermissionProbeOutput {
     states: std::collections::BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::detect_wlroots_series;
+
+    #[test]
+    fn detects_wlroots_series_from_dependency_name() {
+        assert_eq!(
+            detect_wlroots_series("wlroots = dependency('wlroots-0.20', fallback: 'wlroots')"),
+            Some("0.20".to_string())
+        );
+    }
+
+    #[test]
+    fn detects_wlroots_series_from_version_constraint() {
+        assert_eq!(
+            detect_wlroots_series("wlroots_version = ['>=0.19.0', '<0.20.0']"),
+            Some("0.19".to_string())
+        );
+    }
 }
 
 #[derive(Debug)]

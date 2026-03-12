@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const FILES: &[(&str, &str)] = &[
     (
@@ -242,9 +243,178 @@ Cflags: -I${includedir}
 Libs:
 "#,
     ),
+    (
+        "include/libseat.h",
+        r#"#ifndef LIBSEAT_H
+#define LIBSEAT_H
+
+#include <stdarg.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct libseat;
+
+enum libseat_log_level {
+    LIBSEAT_LOG_LEVEL_SILENT = 0,
+    LIBSEAT_LOG_LEVEL_ERROR = 1,
+    LIBSEAT_LOG_LEVEL_INFO = 2,
+    LIBSEAT_LOG_LEVEL_DEBUG = 3,
+    LIBSEAT_LOG_LEVEL_LAST = 4,
+};
+
+typedef void (*libseat_log_func)(enum libseat_log_level level, const char* fmt, va_list args);
+
+struct libseat_seat_listener {
+    void (*enable_seat)(struct libseat* seat, void* userdata);
+    void (*disable_seat)(struct libseat* seat, void* userdata);
+};
+
+struct libseat* libseat_open_seat(const struct libseat_seat_listener* listener, void* userdata);
+int libseat_disable_seat(struct libseat* seat);
+int libseat_close_seat(struct libseat* seat);
+int libseat_open_device(struct libseat* seat, const char* path, int* fd);
+int libseat_close_device(struct libseat* seat, int device_id);
+const char* libseat_seat_name(struct libseat* seat);
+int libseat_switch_session(struct libseat* seat, int session);
+int libseat_get_fd(struct libseat* seat);
+int libseat_dispatch(struct libseat* seat, int timeout);
+void libseat_set_log_level(enum libseat_log_level level);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "lib/pkgconfig/libseat.pc",
+        r#"prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libseat
+Description: macland compatibility shim for libseat discovery
+Version: 0.2.0
+Cflags: -I${includedir}
+Libs: -L${libdir} -lseat
+"#,
+    ),
 ];
 
-pub const DEPENDENCIES: &[&str] = &["libdrm", "gbm", "libinput", "libudev"];
+const STUB_LIBRARIES: &[(&str, &str)] = &[
+    (
+        "librt.a",
+        r#"int macland_librt_stub(void) {
+    return 0;
+}
+"#,
+    ),
+    (
+        "libseat.a",
+        r#"#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "libseat.h"
+
+struct libseat {
+    const struct libseat_seat_listener* listener;
+    void* userdata;
+    int fd_pair[2];
+};
+
+struct libseat* libseat_open_seat(const struct libseat_seat_listener* listener, void* userdata) {
+    struct libseat* seat = calloc(1, sizeof(struct libseat));
+    if (!seat) {
+        return NULL;
+    }
+    seat->listener = listener;
+    seat->userdata = userdata;
+    if (pipe(seat->fd_pair) != 0) {
+        seat->fd_pair[0] = -1;
+        seat->fd_pair[1] = -1;
+    }
+    if (listener && listener->enable_seat) {
+        listener->enable_seat(seat, userdata);
+    }
+    return seat;
+}
+
+int libseat_disable_seat(struct libseat* seat) {
+    if (seat && seat->listener && seat->listener->disable_seat) {
+        seat->listener->disable_seat(seat, seat->userdata);
+    }
+    return 0;
+}
+
+int libseat_close_seat(struct libseat* seat) {
+    if (!seat) {
+        return 0;
+    }
+    if (seat->fd_pair[0] >= 0) {
+        close(seat->fd_pair[0]);
+    }
+    if (seat->fd_pair[1] >= 0) {
+        close(seat->fd_pair[1]);
+    }
+    free(seat);
+    return 0;
+}
+
+int libseat_open_device(struct libseat* seat, const char* path, int* fd) {
+    (void)seat;
+    (void)path;
+    if (fd) {
+        *fd = -1;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+int libseat_close_device(struct libseat* seat, int device_id) {
+    (void)seat;
+    (void)device_id;
+    return 0;
+}
+
+const char* libseat_seat_name(struct libseat* seat) {
+    (void)seat;
+    return "macland-seat";
+}
+
+int libseat_switch_session(struct libseat* seat, int session) {
+    (void)seat;
+    (void)session;
+    errno = ENOSYS;
+    return -1;
+}
+
+int libseat_get_fd(struct libseat* seat) {
+    if (!seat) {
+        errno = EINVAL;
+        return -1;
+    }
+    return seat->fd_pair[0];
+}
+
+int libseat_dispatch(struct libseat* seat, int timeout) {
+    (void)seat;
+    (void)timeout;
+    return 0;
+}
+
+void libseat_set_log_level(enum libseat_log_level level) {
+    (void)level;
+}
+"#,
+    ),
+];
+
+pub const DEPENDENCIES: &[&str] = &["libdrm", "gbm", "libinput", "libudev", "libseat"];
 
 pub fn install_workspace_shims(workspace_root: &Path) -> Result<PathBuf, String> {
     let sysroot = workspace_root.join(".macland").join("sysroot");
@@ -255,7 +425,54 @@ pub fn install_workspace_shims(workspace_root: &Path) -> Result<PathBuf, String>
         }
         fs::write(&path, contents).map_err(|err| err.to_string())?;
     }
+    install_stub_libraries(&sysroot)?;
     Ok(sysroot)
+}
+
+fn install_stub_libraries(sysroot: &Path) -> Result<(), String> {
+    let staging = sysroot.join(".stubs");
+    fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
+
+    for (library_name, source) in STUB_LIBRARIES {
+        let stem = library_name
+            .strip_prefix("lib")
+            .and_then(|name| name.strip_suffix(".a"))
+            .unwrap_or(library_name);
+        let source_path = staging.join(format!("{stem}.c"));
+        let object_path = staging.join(format!("{stem}.o"));
+        let library_path = sysroot.join("lib").join(library_name);
+
+        fs::write(&source_path, source).map_err(|err| err.to_string())?;
+        let compile_status = Command::new("cc")
+            .args([
+                "-c",
+                source_path.to_string_lossy().as_ref(),
+                "-I",
+                sysroot.join("include").to_string_lossy().as_ref(),
+                "-o",
+                object_path.to_string_lossy().as_ref(),
+            ])
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !compile_status.success() {
+            return Err(format!("failed to compile stub library source for {library_name}"));
+        }
+
+        let archive_status = Command::new("libtool")
+            .args([
+                "-static",
+                "-o",
+                library_path.to_string_lossy().as_ref(),
+                object_path.to_string_lossy().as_ref(),
+            ])
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !archive_status.success() {
+            return Err(format!("failed to archive stub library {library_name}"));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -279,6 +496,9 @@ mod tests {
                 .exists());
         }
         assert!(sysroot.join("include/drm_fourcc.h").exists());
+        assert!(sysroot.join("include/libseat.h").exists());
+        assert!(sysroot.join("lib/librt.a").exists());
+        assert!(sysroot.join("lib/libseat.a").exists());
 
         fs::remove_dir_all(&temp).unwrap();
     }
