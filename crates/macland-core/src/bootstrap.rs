@@ -23,6 +23,18 @@ impl BootstrapPlan {
                 }
             }
         }
+        for dependency in report.missing_native_dependencies() {
+            let package = match dependency {
+                "xkbcommon" => Some("libxkbcommon"),
+                "egl" | "glesv2" => Some("mesa"),
+                _ => None,
+            };
+            if let Some(package) = package {
+                if !packages.contains(&package) {
+                    packages.push(package);
+                }
+            }
+        }
         Self { packages }
     }
 
@@ -60,7 +72,7 @@ pub fn execute_bootstrap(plan: &BootstrapPlan) -> Result<(), String> {
 mod tests {
     use super::BootstrapPlan;
     use crate::backend::BackendCapabilities;
-    use crate::doctor::{DoctorReport, HostStatus, ToolStatus};
+    use crate::doctor::{DoctorReport, HostStatus, NativeDependencyStatus, ToolStatus};
 
     #[test]
     fn plans_missing_packages() {
@@ -77,6 +89,18 @@ mod tests {
                     detail: "missing".to_string(),
                 },
             ],
+            native_dependencies: vec![
+                NativeDependencyStatus {
+                    name: "xkbcommon",
+                    found: false,
+                    detail: "missing".to_string(),
+                },
+                NativeDependencyStatus {
+                    name: "egl",
+                    found: false,
+                    detail: "missing".to_string(),
+                },
+            ],
             host: HostStatus {
                 apple_silicon: true,
                 macos: true,
@@ -85,6 +109,6 @@ mod tests {
         };
 
         let plan = BootstrapPlan::from_doctor(&report);
-        assert_eq!(plan.packages, vec!["meson", "ninja"]);
+        assert_eq!(plan.packages, vec!["meson", "ninja", "libxkbcommon", "mesa"]);
     }
 }

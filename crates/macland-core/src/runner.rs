@@ -1,6 +1,7 @@
 use crate::adapter::{AdapterManifest, BuildSystem};
 use crate::report::{ActionRecord, SupportReport, SupportTier, write_action_record};
 use std::collections::BTreeMap;
+use std::env;
 use std::path::Path;
 use std::process::Command;
 
@@ -72,17 +73,56 @@ pub fn execute_command_line(
         .split_first()
         .ok_or_else(|| "empty command".to_string())?;
 
-    let status = Command::new(binary)
-        .args(args)
-        .current_dir(cwd)
-        .envs(env_pairs)
-        .status()
-        .map_err(|err| err.to_string())?;
+    let mut process = Command::new(binary);
+    process.args(args).current_dir(cwd);
+    for (key, value) in effective_env(env_pairs) {
+        process.env(key, value);
+    }
+
+    let status = process.status().map_err(|err| err.to_string())?;
 
     if status.success() {
         Ok(())
     } else {
         Err(format!("command `{}` failed with status {}", command.join(" "), status))
+    }
+}
+
+fn effective_env(env_pairs: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut merged = env_pairs.clone();
+    if let Some(path) = merged_pkg_config_path(env_pairs.get("PKG_CONFIG_PATH")) {
+        merged.insert("PKG_CONFIG_PATH".to_string(), path);
+    }
+    merged
+}
+
+fn merged_pkg_config_path(override_value: Option<&String>) -> Option<String> {
+    let mut paths = Vec::new();
+
+    if let Some(value) = env::var_os("PKG_CONFIG_PATH") {
+        paths.extend(env::split_paths(&value).map(|path| path.display().to_string()));
+    }
+    if let Some(value) = override_value {
+        paths.extend(env::split_paths(value).map(|path| path.display().to_string()));
+    }
+
+    for candidate in [
+        "/opt/homebrew/lib/pkgconfig",
+        "/opt/homebrew/share/pkgconfig",
+        "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
+        "/opt/homebrew/opt/mesa/lib/pkgconfig",
+        "/usr/local/lib/pkgconfig",
+        "/usr/local/share/pkgconfig",
+    ] {
+        if Path::new(candidate).exists() && !paths.iter().any(|path| path == candidate) {
+            paths.push(candidate.to_string());
+        }
+    }
+
+    if paths.is_empty() {
+        None
+    } else {
+        Some(paths.join(":"))
     }
 }
 
@@ -108,7 +148,7 @@ pub fn execute_recorded_command_line(
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandPlan, execute_command_line, inspect_manifest};
+    use super::{CommandPlan, execute_command_line, inspect_manifest, merged_pkg_config_path};
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
 
@@ -140,5 +180,11 @@ mod tests {
     fn executes_simple_command() {
         let cwd = std::env::current_dir().unwrap();
         execute_command_line(&cwd, &["/usr/bin/true".to_string()], &BTreeMap::new()).unwrap();
+    }
+
+    #[test]
+    fn augments_pkg_config_path_with_homebrew_roots() {
+        let merged = merged_pkg_config_path(None).unwrap();
+        assert!(merged.contains("/opt/homebrew/lib/pkgconfig"));
     }
 }

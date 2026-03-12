@@ -170,6 +170,12 @@ fn print_doctor(workspace: &RepoWorkspace, report: DoctorReport) {
     for tool in report.tools {
         println!("tool.{}={} ({})", tool.name, tool.found, tool.detail);
     }
+    for dependency in report.native_dependencies {
+        println!(
+            "dep.{}={} ({})",
+            dependency.name, dependency.found, dependency.detail
+        );
+    }
 }
 
 fn load_manifest(workspace: &RepoWorkspace, repo_id: &str) -> Result<AdapterManifest, String> {
