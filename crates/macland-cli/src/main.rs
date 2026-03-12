@@ -1,9 +1,11 @@
 use macland_core::adapter::AdapterManifest;
 use macland_core::doctor::DoctorReport;
+use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
 use macland_core::runner::{execute_command_line, inspect_manifest, CommandPlan};
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -46,7 +48,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         "run" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
-            run_action("run", &workspace, repo_id, args.iter().any(|arg| arg == "--execute"))
+            run_run_action(&workspace, repo_id, &args[3..], args.iter().any(|arg| arg == "--execute"))
         }
         _ => {
             print_help();
@@ -166,6 +168,44 @@ fn run_action(
     Ok(())
 }
 
+fn run_run_action(
+    workspace: &RepoWorkspace,
+    repo_id: &str,
+    args: &[String],
+    execute: bool,
+) -> Result<(), String> {
+    let manifest = load_manifest(workspace, repo_id)?;
+    let spec = workspace
+        .load_repo_spec(repo_id)
+        .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
+    let source_root = workspace.source_root(&spec);
+    let mode = if args.iter().any(|arg| arg == "--windowed-debug") {
+        HostSessionMode::WindowedDebug
+    } else {
+        HostSessionMode::Fullscreen
+    };
+    let artifacts = create_launch_request(
+        &manifest,
+        &source_root,
+        mode,
+        &workspace.artifacts_root(&spec).join("run"),
+    )?;
+    let host_binary = locate_host_binary(workspace.root());
+
+    println!("repo: {}", manifest.id);
+    println!("action: run");
+    println!("host_binary: {}", host_binary.display());
+    println!("launch_request: {}", artifacts.request_path.display());
+    println!("status_file: {}", artifacts.status_path.display());
+    println!("mode: {:?}", mode);
+
+    if execute {
+        launch_host(&host_binary, &artifacts)?;
+        println!("status: success");
+    }
+    Ok(())
+}
+
 fn infer_repo_id(url: &str) -> String {
     PathBuf::from(url)
         .file_stem()
@@ -182,5 +222,14 @@ fn print_help() {
     println!("  inspect <repo-id>");
     println!("  build <repo-id> [--execute]");
     println!("  test <repo-id> [--execute]");
-    println!("  run <repo-id> [--execute]");
+    println!("  run <repo-id> [--fullscreen|--windowed-debug] [--execute]");
+}
+
+fn locate_host_binary(workspace_root: &Path) -> PathBuf {
+    let debug_binary = workspace_root.join(".build").join("debug").join("macland-host");
+    if debug_binary.exists() {
+        debug_binary
+    } else {
+        PathBuf::from("swift")
+    }
 }

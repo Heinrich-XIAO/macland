@@ -37,6 +37,10 @@ impl RepoWorkspace {
         self.repo_root(spec).join("source")
     }
 
+    pub fn artifacts_root(&self, spec: &RepoSpec) -> PathBuf {
+        self.repo_root(spec).join("artifacts")
+    }
+
     pub fn write_manifest(&self, spec: &RepoSpec, contents: &str) -> Result<PathBuf, String> {
         let root = self.repo_root(spec);
         fs::create_dir_all(&root).map_err(|err| err.to_string())?;

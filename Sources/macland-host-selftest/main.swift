@@ -24,6 +24,7 @@ func runSelfTests() throws {
     try assert(config.compositorExecutable == "/tmp/labwc", "expected compositor path")
     try assert(config.compositorArguments == ["--verbose"], "expected compositor arguments")
     try assert(config.environment["MACLAND_MODE"] == "1", "expected environment capture")
+    try assert(config.autoExitAfterChild == false, "expected auto-exit default to be false")
 
     let audit = PermissionAudit(states: [
         .accessibility: .granted,
@@ -31,6 +32,30 @@ func runSelfTests() throws {
         .screenRecording: .unknown,
     ])
     try assert(audit.missingRequiredPermissions == [.inputMonitoring], "expected missing input monitoring")
+
+    let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let configPath = tempRoot.appendingPathComponent("launch.json")
+    let encoded = try JSONEncoder().encode(
+        HostLaunchConfiguration(
+            mode: .fullscreen,
+            compositorExecutable: "/bin/echo",
+            compositorArguments: ["hello"],
+            environment: ["MACLAND_MODE": "1"],
+            workingDirectory: tempRoot.path,
+            statusFile: tempRoot.appendingPathComponent("status.txt").path,
+            autoExitAfterChild: true
+        )
+    )
+    try encoded.write(to: configPath)
+
+    let decoded = try HostArgumentParser.parse([
+        "macland-host",
+        "--config",
+        configPath.path,
+    ])
+    try assert(decoded.compositorExecutable == "/bin/echo", "expected config-file executable")
+    try assert(decoded.autoExitAfterChild, "expected config-file auto-exit")
 }
 
 do {

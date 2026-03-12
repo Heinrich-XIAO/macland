@@ -2,9 +2,11 @@ import AppKit
 import Foundation
 import MetalKit
 
+@MainActor
 public final class HostSessionController: NSObject, NSApplicationDelegate {
     private let configuration: HostLaunchConfiguration
     private var window: NSWindow?
+    private var compositorProcess: Process?
 
     public init(configuration: HostLaunchConfiguration) {
         self.configuration = configuration
@@ -32,10 +34,78 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        launchCompositorIfNeeded()
 
         if configuration.mode == .fullscreen {
             window.toggleFullScreen(nil)
         }
     }
-}
 
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        compositorProcess?.terminate()
+    }
+
+    private func launchCompositorIfNeeded() {
+        guard let executable = configuration.compositorExecutable else {
+            writeStatus("host_started")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = configuration.compositorArguments
+        if let workingDirectory = configuration.workingDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        }
+
+        var environment = ProcessInfo.processInfo.environment
+        for (key, value) in configuration.environment {
+            environment[key] = value
+        }
+        process.environment = environment
+        let statusFile = configuration.statusFile
+        let autoExitAfterChild = configuration.autoExitAfterChild
+        process.terminationHandler = { process in
+            if let statusFile {
+                try? "child_exit:\(process.terminationStatus)\n".write(
+                    to: URL(fileURLWithPath: statusFile),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
+            if autoExitAfterChild {
+                Task { @MainActor in
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+
+        do {
+            try process.run()
+            compositorProcess = process
+            writeStatus("child_started")
+        } catch {
+            writeStatus("child_failed:\(error.localizedDescription)")
+            if configuration.autoExitAfterChild {
+                Task { @MainActor in
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    private func writeStatus(_ status: String) {
+        guard let statusFile = configuration.statusFile else {
+            return
+        }
+        try? "\(status)\n".write(
+            to: URL(fileURLWithPath: statusFile),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+}

@@ -11,19 +11,28 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
     public var compositorArguments: [String]
     public var environment: [String: String]
     public var permissionHints: [PermissionKind]
+    public var workingDirectory: String?
+    public var statusFile: String?
+    public var autoExitAfterChild: Bool
 
     public init(
         mode: SessionMode,
         compositorExecutable: String? = nil,
         compositorArguments: [String] = [],
         environment: [String: String] = [:],
-        permissionHints: [PermissionKind] = PermissionKind.requiredDefaults
+        permissionHints: [PermissionKind] = PermissionKind.requiredDefaults,
+        workingDirectory: String? = nil,
+        statusFile: String? = nil,
+        autoExitAfterChild: Bool = false
     ) {
         self.mode = mode
         self.compositorExecutable = compositorExecutable
         self.compositorArguments = compositorArguments
         self.environment = environment
         self.permissionHints = permissionHints
+        self.workingDirectory = workingDirectory
+        self.statusFile = statusFile
+        self.autoExitAfterChild = autoExitAfterChild
     }
 }
 
@@ -63,4 +72,3 @@ public struct PermissionAudit: Codable, Equatable, Sendable {
         ]
     )
 }
-
