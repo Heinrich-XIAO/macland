@@ -1,0 +1,14 @@
+id = "example-compositor"
+repo = "REPLACE_REPO_URL"
+rev = "main"
+build_system = "custom"
+configure = []
+build = ["sh", "./build.sh"]
+test = ["sh", "./test.sh"]
+entrypoint = ["./bin/example-compositor"]
+patch_policy = "prefer-none"
+sdk_features = ["metal-fast-path"]
+protocol_expectations = ["xdg-shell"]
+
+[env]
+MACLAND_MODE = "1"
