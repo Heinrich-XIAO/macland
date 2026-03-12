@@ -1,0 +1,7 @@
+.build
+DerivedData
+target
+artifacts
+repos
+.DS_Store
+
