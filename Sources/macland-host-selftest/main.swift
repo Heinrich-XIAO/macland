@@ -32,6 +32,9 @@ func runSelfTests() throws {
         .screenRecording: .unknown,
     ])
     try assert(audit.missingRequiredPermissions == [.inputMonitoring], "expected missing input monitoring")
+    let encodedAudit = try PermissionProbe.encodeCurrentAudit()
+    let decodedAudit = try JSONDecoder().decode(PermissionAudit.self, from: encodedAudit)
+    try assert(decodedAudit.states[.accessibility] != nil, "expected accessibility state")
 
     let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)

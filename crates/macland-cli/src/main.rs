@@ -7,6 +7,7 @@ use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
 use macland_core::report::{ActionRecord, SupportReport, SupportTier, load_action_record, write_action_record};
 use macland_core::runner::{execute_recorded_command_line, inspect_manifest, CommandPlan};
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -26,7 +27,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
 
     match command {
         "doctor" => {
-            print_doctor(DoctorReport::gather());
+            print_doctor(&workspace, DoctorReport::gather());
             Ok(())
         }
         "bootstrap" => {
@@ -133,7 +134,7 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
     }
 }
 
-fn print_doctor(report: DoctorReport) {
+fn print_doctor(workspace: &RepoWorkspace, report: DoctorReport) {
     println!("host.macos={}", report.host.macos);
     println!("host.apple_silicon={}", report.host.apple_silicon);
     println!("backend.renderer={:?}", report.backend.renderer);
@@ -162,6 +163,11 @@ fn print_doctor(report: DoctorReport) {
         "backend.permissions={}",
         report.backend.permission_requirements.join(",")
     );
+    if let Some(permissions) = probe_permissions(workspace.root()) {
+        println!("permission.accessibility={}", permissions.accessibility);
+        println!("permission.inputMonitoring={}", permissions.input_monitoring);
+        println!("permission.screenRecording={}", permissions.screen_recording);
+    }
     for tool in report.tools {
         println!("tool.{}={} ({})", tool.name, tool.found, tool.detail);
     }
@@ -368,12 +374,18 @@ fn locate_host_binary(workspace_root: &Path) -> Result<PathBuf, String> {
     if let Ok(path) = env::var("MACLAND_HOST_BINARY") {
         return Ok(PathBuf::from(path));
     }
-    let debug_binary = workspace_root.join(".build").join("debug").join("macland-host");
-    if debug_binary.exists() {
-        Ok(debug_binary)
+    if let Some(binary) = find_swiftpm_binary(workspace_root, "macland-host") {
+        Ok(binary)
     } else {
-        Err("macland-host binary is missing; run `swift build` first or set MACLAND_HOST_BINARY".to_string())
+        Err(
+            "macland-host binary is missing; run `swift build` first or set MACLAND_HOST_BINARY"
+                .to_string(),
+        )
     }
+}
+
+fn locate_permissions_binary(workspace_root: &Path) -> Option<PathBuf> {
+    find_swiftpm_binary(workspace_root, "macland-permissions")
 }
 
 fn run_bootstrap(execute: bool) -> Result<(), String> {
@@ -454,6 +466,57 @@ fn format_build_system(system: macland_core::adapter::BuildSystem) -> &'static s
         macland_core::adapter::BuildSystem::Make => "make",
         macland_core::adapter::BuildSystem::Custom => "custom",
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct PermissionProbeOutput {
+    states: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug)]
+struct PermissionLines {
+    accessibility: String,
+    input_monitoring: String,
+    screen_recording: String,
+}
+
+fn probe_permissions(workspace_root: &Path) -> Option<PermissionLines> {
+    let binary = locate_permissions_binary(workspace_root)?;
+    let output = Command::new(binary).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let parsed: PermissionProbeOutput = serde_json::from_slice(&output.stdout).ok()?;
+    Some(PermissionLines {
+        accessibility: parsed
+            .states
+            .get("accessibility")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+        input_monitoring: parsed
+            .states
+            .get("inputMonitoring")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+        screen_recording: parsed
+            .states
+            .get("screenRecording")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+    })
+}
+
+fn find_swiftpm_binary(workspace_root: &Path, name: &str) -> Option<PathBuf> {
+    let candidates = [
+        workspace_root.join(".build").join("debug").join(name),
+        workspace_root
+            .join(".build")
+            .join("arm64-apple-macosx")
+            .join("debug")
+            .join(name),
+    ];
+
+    candidates.into_iter().find(|candidate| candidate.exists())
 }
 
 fn inspect_repo(workspace: &RepoWorkspace, spec: &RepoSpec, manifest: &AdapterManifest) -> SupportReport {

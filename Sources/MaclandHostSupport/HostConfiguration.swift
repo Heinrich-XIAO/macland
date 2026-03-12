@@ -71,4 +71,10 @@ public struct PermissionAudit: Codable, Equatable, Sendable {
             .screenRecording: .unknown,
         ]
     )
+
+    public var stringStates: [String: String] {
+        Dictionary(uniqueKeysWithValues: states.map { key, value in
+            (key.rawValue, value.rawValue)
+        })
+    }
 }

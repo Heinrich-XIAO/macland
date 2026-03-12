@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "MaclandHostSupport", targets: ["MaclandHostSupport"]),
         .executable(name: "macland-host", targets: ["macland-host"]),
         .executable(name: "macland-host-selftest", targets: ["macland-host-selftest"]),
+        .executable(name: "macland-permissions", targets: ["macland-permissions"]),
     ],
     targets: [
         .target(
@@ -25,6 +26,11 @@ let package = Package(
             name: "macland-host-selftest",
             dependencies: ["MaclandHostSupport"],
             path: "Sources/macland-host-selftest"
+        ),
+        .executableTarget(
+            name: "macland-permissions",
+            dependencies: ["MaclandHostSupport"],
+            path: "Sources/macland-permissions"
         ),
     ]
 )

@@ -34,6 +34,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        applyPresentationMode()
         launchCompositorIfNeeded()
 
         if configuration.mode == .fullscreen {
@@ -47,6 +48,21 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         compositorProcess?.terminate()
+    }
+
+    private func applyPresentationMode() {
+        guard configuration.mode == .fullscreen else {
+            NSApp.presentationOptions = []
+            return
+        }
+
+        NSApp.presentationOptions = [
+            .hideDock,
+            .hideMenuBar,
+            .disableProcessSwitching,
+            .disableForceQuit,
+            .disableHideApplication,
+        ]
     }
 
     private func launchCompositorIfNeeded() {
@@ -102,10 +118,19 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         guard let statusFile = configuration.statusFile else {
             return
         }
-        try? "\(status)\n".write(
+        let payload = StatusEnvelope(
+            status: status,
+            permissions: PermissionProbe.currentAudit().stringStates
+        )
+        let data = try? JSONEncoder().encode(payload)
+        try? data?.write(
             to: URL(fileURLWithPath: statusFile),
-            atomically: true,
-            encoding: .utf8
+            options: .atomic
         )
     }
+}
+
+private struct StatusEnvelope: Codable {
+    let status: String
+    let permissions: [String: String]
 }

@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 macland-core = { path = "../macland-core" }
-
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
