@@ -5,7 +5,7 @@ build_system = "cargo"
 configure = ["cargo", "fetch"]
 build = ["cargo", "build", "--release", "--no-default-features"]
 test = ["cargo", "test", "--release", "--no-default-features", "-p", "niri-config", "-p", "niri-ipc", "--lib"]
-entrypoint = ["./target/release/niri"]
+entrypoint = ["./target/release/niri", "--config", "../../../overrides/niri/config.kdl"]
 patch_policy = "compatibility-lane"
 sdk_features = ["metal-fast-path", "seat-v1", "event-queue-v1"]
 protocol_expectations = ["xdg-shell"]
@@ -14,3 +14,7 @@ protocol_expectations = ["xdg-shell"]
 DISPLAY = "macland"
 MACLAND_HEADLESS = "1"
 RUSTFLAGS = "-C debuginfo=0 -C link-arg=-Wl,-ld_classic -C link-arg=-ludev"
+XCURSOR_PATH = "/opt/homebrew/share/icons"
+LIBGL_ALWAYS_SOFTWARE = "1"
+MESA_LOADER_DRIVER_OVERRIDE = "llvmpipe"
+RUST_LOG = "warn,niri=info,smithay::wayland::socket=info,smithay::backend::egl::display=error,smithay::input::keyboard::keymap_file=off,niri::cursor=error"

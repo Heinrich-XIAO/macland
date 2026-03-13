@@ -96,12 +96,18 @@ def main(argv: list[str]) -> int:
         else:
             print_help()
         return 0
+    except CliInterrupted:
+        return 130
     except CliError as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
 
 
 class CliError(RuntimeError):
+    pass
+
+
+class CliInterrupted(RuntimeError):
     pass
 
 
@@ -601,12 +607,86 @@ def workspace_command_env(workspace: Path) -> dict[str, str]:
     lib_dir = sysroot / "lib"
     include_dir = sysroot / "include"
     share_dir = sysroot / "share" / "pkgconfig"
-    paths = [str(lib_dir / "pkgconfig"), str(share_dir)]
-    env["PKG_CONFIG_PATH"] = ":".join([*paths, env.get("PKG_CONFIG_PATH", "")]).strip(":")
-    env["CMAKE_PREFIX_PATH"] = ":".join([str(sysroot), env.get("CMAKE_PREFIX_PATH", "")]).strip(":")
-    env["LIBRARY_PATH"] = ":".join([str(lib_dir), env.get("LIBRARY_PATH", "")]).strip(":")
-    env["CPATH"] = ":".join([str(include_dir), env.get("CPATH", "")]).strip(":")
-    env["PATH"] = ":".join([str(workspace / ".macland" / "tools" / "bin"), env.get("PATH", "")]).strip(":")
+    def merge_path(extra: list[str], existing: str) -> str:
+        values = [value for value in [*extra, existing] if value]
+        return ":".join(values)
+
+    pkg_paths = [
+        str(lib_dir / "pkgconfig"),
+        str(share_dir),
+        "/opt/homebrew/lib/pkgconfig",
+        "/opt/homebrew/share/pkgconfig",
+        "/opt/homebrew/opt/epoll-shim/lib/pkgconfig",
+        "/opt/homebrew/opt/jpeg/lib/pkgconfig",
+        "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
+        "/opt/homebrew/opt/mesa/lib/pkgconfig",
+        "/usr/local/lib/pkgconfig",
+        "/usr/local/share/pkgconfig",
+    ]
+    include_paths = [
+        str(include_dir / "libepoll-shim"),
+        str(include_dir),
+        "/opt/homebrew/include",
+        "/opt/homebrew/opt/epoll-shim/include",
+        "/opt/homebrew/opt/jpeg/include",
+        "/opt/homebrew/opt/libxkbcommon/include",
+        "/opt/homebrew/opt/mesa/include",
+        "/usr/local/include",
+    ]
+    library_paths = [
+        str(lib_dir),
+        "/opt/homebrew/lib",
+        "/opt/homebrew/opt/epoll-shim/lib",
+        "/opt/homebrew/opt/jpeg/lib",
+        "/opt/homebrew/opt/libxkbcommon/lib",
+        "/opt/homebrew/opt/mesa/lib",
+        "/usr/local/lib",
+    ]
+    path_entries = [
+        str(sysroot / "bin"),
+        str(workspace / ".macland" / "tools" / "bin"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ]
+
+    env["PKG_CONFIG_PATH"] = merge_path(pkg_paths, env.get("PKG_CONFIG_PATH", ""))
+    env["CMAKE_PREFIX_PATH"] = merge_path(
+        [str(sysroot), "/opt/homebrew", "/opt/homebrew/opt/libxkbcommon", "/opt/homebrew/opt/mesa", "/usr/local"],
+        env.get("CMAKE_PREFIX_PATH", ""),
+    )
+    env["LIBRARY_PATH"] = merge_path(library_paths, env.get("LIBRARY_PATH", ""))
+    env["DYLD_FALLBACK_LIBRARY_PATH"] = merge_path(
+        library_paths,
+        env.get("DYLD_FALLBACK_LIBRARY_PATH", ""),
+    )
+    env["CPATH"] = merge_path(include_paths, env.get("CPATH", ""))
+    env["CPPFLAGS"] = " ".join(
+        value
+        for value in [
+            " ".join(f"-I{path}" for path in include_paths),
+            env.get("CPPFLAGS", ""),
+        ]
+        if value
+    )
+    compile_flags = " ".join(
+        value
+        for value in [
+            " ".join(f"-I{path}" for path in include_paths),
+            env.get("CFLAGS", ""),
+        ]
+        if value
+    )
+    env["CFLAGS"] = compile_flags
+    env["CXXFLAGS"] = " ".join(value for value in [compile_flags, env.get("CXXFLAGS", "")] if value)
+    env["LDFLAGS"] = " ".join(
+        value
+        for value in [
+            " ".join(["-lrt", *[f"-L{path}" for path in library_paths]]),
+            env.get("LDFLAGS", ""),
+        ]
+        if value
+    )
+    env["PATH"] = merge_path(path_entries, env.get("PATH", ""))
     return env
 
 
@@ -617,9 +697,19 @@ def ensure_runtime_dir(root: Path) -> Path:
 def run_checked(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     if not command:
         raise CliError("empty command")
-    completed = subprocess.run(command, cwd=cwd, env=env)
-    if completed.returncode != 0:
-        raise CliError(f"command failed with status {completed.returncode}: {' '.join(command)}")
+    process = subprocess.Popen(command, cwd=cwd, env=env)
+    try:
+        return_code = process.wait()
+    except KeyboardInterrupt as exc:
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise CliInterrupted() from exc
+    if return_code != 0:
+        raise CliError(f"command failed with status {return_code}: {' '.join(command)}")
 
 
 def write_action_record(root: Path, action: str, success: bool, command: list[str]) -> None:

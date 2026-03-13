@@ -1,0 +1,39 @@
+input {
+    keyboard {
+        xkb {
+            layout "us"
+        }
+    }
+}
+
+layout {
+    focus-ring {
+        width 2
+        active-color "#7fc8ff"
+        inactive-color "#505050"
+    }
+    border {
+        off
+    }
+}
+
+hotkey-overlay {
+    skip-at-startup
+}
+
+config-notification {
+    disable-failed
+}
+
+cursor {
+    xcursor-theme "default"
+    xcursor-size 24
+}
+
+clipboard {
+    disable-primary
+}
+
+xwayland-satellite {
+    off
+}
