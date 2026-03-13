@@ -19,11 +19,7 @@ pub struct ShimAssessment {
 
 impl ShimAssessment {
     pub fn summary(&self) -> &'static str {
-        if self.ready {
-            "ready"
-        } else {
-            "incomplete"
-        }
+        if self.ready { "ready" } else { "incomplete" }
     }
 }
 
@@ -37,16 +33,18 @@ pub fn assess_manifest(
             vec!["metal-fast-path", "seat-v1", "event-queue-v1"],
             vec!["xdg-shell", "layer-shell"],
         ),
-        CompositorFamily::Weston => (
-            vec!["metal-fast-path", "seat-v1"],
-            vec!["xdg-shell"],
-        ),
+        CompositorFamily::Weston => (vec!["metal-fast-path", "seat-v1"], vec!["xdg-shell"]),
         CompositorFamily::Custom => (Vec::new(), Vec::new()),
     };
 
     let missing_sdk_features = sdk_requirements
         .into_iter()
-        .filter(|feature| !manifest.sdk_features.iter().any(|present| present == feature))
+        .filter(|feature| {
+            !manifest
+                .sdk_features
+                .iter()
+                .any(|present| present == feature)
+        })
         .map(str::to_string)
         .collect::<Vec<_>>();
     let missing_protocols = protocol_requirements
@@ -106,7 +104,7 @@ pub fn detect_family(manifest: &AdapterManifest) -> CompositorFamily {
 
 #[cfg(test)]
 mod tests {
-    use super::{assess_manifest, detect_family, CompositorFamily};
+    use super::{CompositorFamily, assess_manifest, detect_family};
     use crate::adapter::{AdapterManifest, BuildSystem};
     use crate::backend::BackendCapabilities;
     use std::collections::BTreeMap;

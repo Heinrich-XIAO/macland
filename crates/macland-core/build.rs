@@ -7,4 +7,3 @@ fn main() {
     println!("cargo:rerun-if-changed=native/include/macland_sdk.h");
     println!("cargo:rerun-if-changed=native/src/macland_sdk.c");
 }
-

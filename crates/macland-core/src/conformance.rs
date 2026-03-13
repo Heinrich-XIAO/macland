@@ -1,5 +1,5 @@
 use crate::adapter::AdapterManifest;
-use crate::host::{create_launch_request, launch_host, HostLaunchArtifacts, HostSessionMode};
+use crate::host::{HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};

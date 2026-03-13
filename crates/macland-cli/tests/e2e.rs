@@ -32,7 +32,11 @@ fn run(cmd: &mut Command) {
 
 fn output(cmd: &mut Command) -> String {
     let output = cmd.output().unwrap();
-    assert!(output.status.success(), "command failed with status {}", output.status);
+    assert!(
+        output.status.success(),
+        "command failed with status {}",
+        output.status
+    );
     String::from_utf8(output.stdout).unwrap()
 }
 
@@ -59,38 +63,38 @@ exit 0
 
 fn create_git_fixture(fixture_root: &Path, source_repo: &Path) {
     copy_dir_all(fixture_root, source_repo);
-    run(Command::new("git").args(["init", "-b", "main"]).current_dir(source_repo));
-    run(Command::new("git").args(["add", "."]).current_dir(source_repo));
-    run(
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=macland",
-                "-c",
-                "user.email=macland@example.invalid",
-                "commit",
-                "-m",
-                "fixture",
-            ])
-            .current_dir(source_repo),
-    );
+    run(Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(source_repo));
+    run(Command::new("git")
+        .args(["add", "."])
+        .current_dir(source_repo));
+    run(Command::new("git")
+        .args([
+            "-c",
+            "user.name=macland",
+            "-c",
+            "user.email=macland@example.invalid",
+            "commit",
+            "-m",
+            "fixture",
+        ])
+        .current_dir(source_repo));
 }
 
 fn commit_all(repo: &Path, message: &str) {
     run(Command::new("git").args(["add", "."]).current_dir(repo));
-    run(
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=macland",
-                "-c",
-                "user.email=macland@example.invalid",
-                "commit",
-                "-m",
-                message,
-            ])
-            .current_dir(repo),
-    );
+    run(Command::new("git")
+        .args([
+            "-c",
+            "user.name=macland",
+            "-c",
+            "user.email=macland@example.invalid",
+            "commit",
+            "-m",
+            message,
+        ])
+        .current_dir(repo));
 }
 
 #[test]
@@ -124,62 +128,70 @@ fn cli_exercises_repo_workflow() {
         .replace("REPLACE_REPO_URL", &repo_url);
     fs::write(&manifest_path, manifest).unwrap();
 
-    run(
-        Command::new(&binary)
-            .args(["repo", "sync", source_repo.file_name().unwrap().to_str().unwrap()])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["build", source_repo.file_name().unwrap().to_str().unwrap(), "--execute"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["test", source_repo.file_name().unwrap().to_str().unwrap(), "--upstream", "--execute"])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args([
+            "repo",
+            "sync",
+            source_repo.file_name().unwrap().to_str().unwrap(),
+        ])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args([
+            "build",
+            source_repo.file_name().unwrap().to_str().unwrap(),
+            "--execute",
+        ])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args([
+            "test",
+            source_repo.file_name().unwrap().to_str().unwrap(),
+            "--upstream",
+            "--execute",
+        ])
+        .current_dir(&workspace));
 
     let host_stub = workspace.join("host-stub.sh");
     write_host_stub(&host_stub);
-    run(
-        Command::new(&binary)
-            .args([
-                "test",
-                source_repo.file_name().unwrap().to_str().unwrap(),
-                "--conformance",
-                "--execute",
-            ])
-            .env("MACLAND_HOST_BINARY", &host_stub)
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args([
-                "run",
-                source_repo.file_name().unwrap().to_str().unwrap(),
-                "--windowed-debug",
-                "--execute",
-            ])
-            .env("MACLAND_HOST_BINARY", &host_stub)
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args([
+            "test",
+            source_repo.file_name().unwrap().to_str().unwrap(),
+            "--conformance",
+            "--execute",
+        ])
+        .env("MACLAND_HOST_BINARY", &host_stub)
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args([
+            "run",
+            source_repo.file_name().unwrap().to_str().unwrap(),
+            "--windowed-debug",
+            "--execute",
+        ])
+        .env("MACLAND_HOST_BINARY", &host_stub)
+        .current_dir(&workspace));
 
     let inspect_output = output(
         Command::new(&binary)
-            .args(["inspect", source_repo.file_name().unwrap().to_str().unwrap()])
+            .args([
+                "inspect",
+                source_repo.file_name().unwrap().to_str().unwrap(),
+            ])
             .current_dir(&workspace),
     );
     assert!(inspect_output.contains("conformance_pass: true"));
     assert!(inspect_output.contains("fullscreen_run_pass: true"));
 
-    assert!(workspace
-        .join("repos")
-        .join(source_repo.file_name().unwrap())
-        .join("source")
-        .join("bin")
-        .join("example-compositor")
-        .exists());
+    assert!(
+        workspace
+            .join("repos")
+            .join(source_repo.file_name().unwrap())
+            .join("source")
+            .join("bin")
+            .join("example-compositor")
+            .exists()
+    );
 }
 
 #[test]
@@ -199,37 +211,26 @@ fn cli_autodetects_cargo_repo_workflow() {
     let repo_url = source_repo.display().to_string();
     let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
 
-    run(
-        Command::new(&binary)
-            .args(["repo", "add", &repo_url, "--rev", "main"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["repo", "sync", repo_id])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["repo", "add", &repo_url, "--rev", "main"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["repo", "sync", repo_id])
+        .current_dir(&workspace));
 
-    let manifest = fs::read_to_string(
-        workspace
-            .join("repos")
-            .join(repo_id)
-            .join("macland.toml"),
-    )
-    .unwrap();
+    let manifest =
+        fs::read_to_string(workspace.join("repos").join(repo_id).join("macland.toml")).unwrap();
     assert!(manifest.contains("build_system = \"cargo\""));
-    assert!(manifest.contains("entrypoint = [\"cargo\", \"run\", \"--bin\", \"cargo-compositor\"]"));
+    assert!(
+        manifest.contains("entrypoint = [\"cargo\", \"run\", \"--bin\", \"cargo-compositor\"]")
+    );
 
-    run(
-        Command::new(&binary)
-            .args(["build", repo_id, "--execute"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["test", repo_id, "--upstream", "--execute"])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["build", repo_id, "--execute"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["test", repo_id, "--upstream", "--execute"])
+        .current_dir(&workspace));
     let inspect_output = output(
         Command::new(&binary)
             .args(["inspect", repo_id])
@@ -256,36 +257,23 @@ fn cli_autodetects_cmake_repo_workflow() {
     let repo_url = source_repo.display().to_string();
     let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
 
-    run(
-        Command::new(&binary)
-            .args(["repo", "add", &repo_url, "--rev", "main"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["repo", "sync", repo_id])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["repo", "add", &repo_url, "--rev", "main"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["repo", "sync", repo_id])
+        .current_dir(&workspace));
 
-    let manifest = fs::read_to_string(
-        workspace
-            .join("repos")
-            .join(repo_id)
-            .join("macland.toml"),
-    )
-    .unwrap();
+    let manifest =
+        fs::read_to_string(workspace.join("repos").join(repo_id).join("macland.toml")).unwrap();
     assert!(manifest.contains("build_system = \"cmake\""));
 
-    run(
-        Command::new(&binary)
-            .args(["build", repo_id, "--execute"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["test", repo_id, "--upstream", "--execute"])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["build", repo_id, "--execute"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["test", repo_id, "--upstream", "--execute"])
+        .current_dir(&workspace));
 
     let inspect_output = output(
         Command::new(&binary)
@@ -313,51 +301,31 @@ fn cli_autodetects_meson_repo_workflow() {
     let repo_url = source_repo.display().to_string();
     let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
 
-    run(
-        Command::new(&binary)
-            .args(["repo", "add", &repo_url, "--rev", "main"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["repo", "sync", repo_id])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["repo", "add", &repo_url, "--rev", "main"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["repo", "sync", repo_id])
+        .current_dir(&workspace));
 
-    let manifest = fs::read_to_string(
-        workspace
-            .join("repos")
-            .join(repo_id)
-            .join("macland.toml"),
-    )
-    .unwrap();
+    let manifest =
+        fs::read_to_string(workspace.join("repos").join(repo_id).join("macland.toml")).unwrap();
     assert!(manifest.contains("build_system = \"meson\""));
     assert!(manifest.contains("entrypoint = [\"./build/demo-meson-compositor\"]"));
 
-    run(
-        Command::new(&binary)
-            .args(["build", repo_id, "--execute"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["test", repo_id, "--upstream", "--execute"])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["build", repo_id, "--execute"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["test", repo_id, "--upstream", "--execute"])
+        .current_dir(&workspace));
 
     let host_stub = workspace.join("host-stub.sh");
     write_host_stub(&host_stub);
-    run(
-        Command::new(&binary)
-            .args([
-                "run",
-                repo_id,
-                "--windowed-debug",
-                "--execute",
-            ])
-            .env("MACLAND_HOST_BINARY", &host_stub)
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["run", repo_id, "--windowed-debug", "--execute"])
+        .env("MACLAND_HOST_BINARY", &host_stub)
+        .current_dir(&workspace));
 
     let inspect_output = output(
         Command::new(&binary)
@@ -380,46 +348,46 @@ fn repo_sync_initializes_recursive_submodules() {
     fs::create_dir_all(&child_repo).unwrap();
 
     fs::write(child_repo.join("README.md"), "child\n").unwrap();
-    run(Command::new("git").args(["init", "-b", "main"]).current_dir(&child_repo));
+    run(Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(&child_repo));
     commit_all(&child_repo, "child");
 
     fs::write(parent_repo.join("README.md"), "parent\n").unwrap();
-    run(Command::new("git").args(["init", "-b", "main"]).current_dir(&parent_repo));
-    run(
-        Command::new("git")
-            .args([
-                "-c",
-                "protocol.file.allow=always",
-                "submodule",
-                "add",
-                child_repo.to_str().unwrap(),
-                "vendor/child",
-            ])
-            .current_dir(&parent_repo),
-    );
+    run(Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(&parent_repo));
+    run(Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            child_repo.to_str().unwrap(),
+            "vendor/child",
+        ])
+        .current_dir(&parent_repo));
     commit_all(&parent_repo, "parent");
 
     let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
     let repo_url = parent_repo.display().to_string();
     let repo_id = parent_repo.file_name().unwrap().to_str().unwrap();
 
-    run(
-        Command::new(&binary)
-            .args(["repo", "add", &repo_url, "--rev", "main"])
-            .current_dir(&workspace),
-    );
-    run(
-        Command::new(&binary)
-            .args(["repo", "sync", repo_id])
-            .current_dir(&workspace),
-    );
+    run(Command::new(&binary)
+        .args(["repo", "add", &repo_url, "--rev", "main"])
+        .current_dir(&workspace));
+    run(Command::new(&binary)
+        .args(["repo", "sync", repo_id])
+        .current_dir(&workspace));
 
-    assert!(workspace
-        .join("repos")
-        .join(repo_id)
-        .join("source")
-        .join("vendor")
-        .join("child")
-        .join("README.md")
-        .exists());
+    assert!(
+        workspace
+            .join("repos")
+            .join(repo_id)
+            .join("source")
+            .join("vendor")
+            .join("child")
+            .join("README.md")
+            .exists()
+    );
 }

@@ -110,10 +110,7 @@ pub fn sdk_capabilities() -> BackendCapabilities {
         supports_single_display_session: capabilities.supports_single_display_session != 0,
         supports_multi_display_session: capabilities.supports_multi_display_session != 0,
         supports_event_queue: capabilities.supports_event_queue != 0,
-        permission_requirements: vec![
-            "accessibility".to_string(),
-            "input-monitoring".to_string(),
-        ],
+        permission_requirements: vec!["accessibility".to_string(), "input-monitoring".to_string()],
         supports_c_abi: capabilities.supports_c_abi != 0,
     }
 }
@@ -231,7 +228,10 @@ fn map_snapshot(snapshot: MaclandSdkSessionSnapshot) -> SessionSnapshot {
 
 fn map_event(event: MaclandSdkEvent) -> BackendEvent {
     match event.kind {
-        2 => BackendEvent::PointerMoved { x: event.x, y: event.y },
+        2 => BackendEvent::PointerMoved {
+            x: event.x,
+            y: event.y,
+        },
         3 => BackendEvent::KeyChanged {
             keycode: event.keycode,
             pressed: event.pressed != 0,
@@ -248,7 +248,7 @@ fn map_event(event: MaclandSdkEvent) -> BackendEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::{sdk_capabilities, sdk_default_session_snapshot, SdkSession};
+    use super::{SdkSession, sdk_capabilities, sdk_default_session_snapshot};
     use crate::backend::{BackendEvent, RendererKind};
 
     #[test]

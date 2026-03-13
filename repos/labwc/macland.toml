@@ -2,7 +2,7 @@ id = "labwc"
 repo = "https://github.com/labwc/labwc.git"
 rev = "master"
 build_system = "meson"
-configure = ["meson", "setup", "build"]
+configure = ["meson", "setup", "build", "--reconfigure", "-Dwlroots:backends=x11", "-Dwlroots:session=disabled", "-Dwlroots:libliftoff=disabled", "-Dwlroots:xwayland=disabled", "-Dwlroots:color-management=disabled", "-Dwlroots:allocators=[]", "-Dwlroots:renderers=[]"]
 build = ["meson", "compile", "-C", "build"]
 test = ["meson", "test", "-C", "build"]
 entrypoint = ["./build/labwc"]

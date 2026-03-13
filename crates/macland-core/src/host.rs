@@ -64,7 +64,10 @@ pub fn create_launch_request(
 
 pub fn launch_host(host_binary: &Path, artifacts: &HostLaunchArtifacts) -> Result<(), String> {
     let status = Command::new(host_binary)
-        .args(["--config", artifacts.request_path.to_string_lossy().as_ref()])
+        .args([
+            "--config",
+            artifacts.request_path.to_string_lossy().as_ref(),
+        ])
         .status()
         .map_err(|err| err.to_string())?;
 
@@ -86,16 +89,14 @@ fn resolve_binary(source_root: &Path, binary: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_launch_request, HostSessionMode};
+    use super::{HostSessionMode, create_launch_request};
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
 
     #[test]
     fn creates_launch_request_file() {
-        let root = std::env::temp_dir().join(format!(
-            "macland-host-artifacts-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("macland-host-artifacts-{}", std::process::id()));
         let manifest = AdapterManifest {
             id: "fixture".to_string(),
             repo: "https://example.com".to_string(),
@@ -110,9 +111,13 @@ mod tests {
             protocol_expectations: vec!["xdg-shell".to_string()],
             patch_policy: "prefer-none".to_string(),
         };
-        let artifacts =
-            create_launch_request(&manifest, Path::new("/tmp/demo"), HostSessionMode::WindowedDebug, &root)
-                .unwrap();
+        let artifacts = create_launch_request(
+            &manifest,
+            Path::new("/tmp/demo"),
+            HostSessionMode::WindowedDebug,
+            &root,
+        )
+        .unwrap();
         let contents = std::fs::read_to_string(artifacts.request_path).unwrap();
         assert!(contents.contains("\"windowedDebug\""));
         assert!(contents.contains("/tmp/demo/bin/demo"));

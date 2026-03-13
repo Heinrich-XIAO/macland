@@ -1,12 +1,14 @@
 use macland_core::adapter::AdapterManifest;
-use macland_core::bootstrap::{execute_bootstrap, BootstrapPlan};
+use macland_core::bootstrap::{BootstrapPlan, execute_bootstrap};
 use macland_core::conformance::run_conformance;
 use macland_core::detect::autodetect_manifest;
 use macland_core::doctor::DoctorReport;
-use macland_core::host::{create_launch_request, launch_host, HostSessionMode};
+use macland_core::host::{HostSessionMode, create_launch_request, launch_host};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
-use macland_core::report::{ActionRecord, SupportReport, SupportTier, load_action_record, write_action_record};
-use macland_core::runner::{execute_recorded_command_line, inspect_manifest, CommandPlan};
+use macland_core::report::{
+    ActionRecord, SupportReport, SupportTier, load_action_record, write_action_record,
+};
+use macland_core::runner::{CommandPlan, execute_recorded_command_line, inspect_manifest};
 use macland_core::shim::assess_manifest;
 use serde::Deserialize;
 use std::env;
@@ -52,22 +54,46 @@ fn run(args: Vec<String>) -> Result<(), String> {
             println!("tier: {:?}", report.tier);
             println!("shim.family: {:?}", shim.family);
             println!("shim.status: {}", shim.summary());
-            println!("shim.missing_sdk_features: {}", shim.missing_sdk_features.join(","));
-            println!("shim.missing_protocols: {}", shim.missing_protocols.join(","));
-            println!("shim.missing_backend_flags: {}", shim.missing_backend_flags.join(","));
+            println!(
+                "shim.missing_sdk_features: {}",
+                shim.missing_sdk_features.join(",")
+            );
+            println!(
+                "shim.missing_protocols: {}",
+                shim.missing_protocols.join(",")
+            );
+            println!(
+                "shim.missing_backend_flags: {}",
+                shim.missing_backend_flags.join(",")
+            );
             Ok(())
         }
         "build" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
-            run_action("build", &workspace, repo_id, args.iter().any(|arg| arg == "--execute"))
+            run_action(
+                "build",
+                &workspace,
+                repo_id,
+                args.iter().any(|arg| arg == "--execute"),
+            )
         }
         "test" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
-            run_test_action(&workspace, repo_id, &args[3..], args.iter().any(|arg| arg == "--execute"))
+            run_test_action(
+                &workspace,
+                repo_id,
+                &args[3..],
+                args.iter().any(|arg| arg == "--execute"),
+            )
         }
         "run" => {
             let repo_id = args.get(2).ok_or_else(|| "missing repo id".to_string())?;
-            run_run_action(&workspace, repo_id, &args[3..], args.iter().any(|arg| arg == "--execute"))
+            run_run_action(
+                &workspace,
+                repo_id,
+                &args[3..],
+                args.iter().any(|arg| arg == "--execute"),
+            )
         }
         _ => {
             print_help();
@@ -158,15 +184,24 @@ fn print_doctor(workspace: &RepoWorkspace, report: DoctorReport) {
         report.backend.supports_multi_display_session
     );
     println!("backend.c_abi={}", report.backend.supports_c_abi);
-    println!("backend.event_queue={}", report.backend.supports_event_queue);
+    println!(
+        "backend.event_queue={}",
+        report.backend.supports_event_queue
+    );
     println!(
         "backend.permissions={}",
         report.backend.permission_requirements.join(",")
     );
     if let Some(permissions) = probe_permissions(workspace.root()) {
         println!("permission.accessibility={}", permissions.accessibility);
-        println!("permission.inputMonitoring={}", permissions.input_monitoring);
-        println!("permission.screenRecording={}", permissions.screen_recording);
+        println!(
+            "permission.inputMonitoring={}",
+            permissions.input_monitoring
+        );
+        println!(
+            "permission.screenRecording={}",
+            permissions.screen_recording
+        );
     }
     for tool in report.tools {
         println!("tool.{}={} ({})", tool.name, tool.found, tool.detail);
@@ -192,9 +227,15 @@ fn run_action(
 ) -> Result<(), String> {
     let manifest = load_manifest(workspace, repo_id)?;
     let plan = CommandPlan::for_manifest(&manifest);
-    let spec = workspace.load_repo_spec(repo_id).unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
+    let spec = workspace
+        .load_repo_spec(repo_id)
+        .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
     let source_root = workspace.source_root(&spec);
-    let repo_root = if source_root.exists() { source_root } else { workspace.repo_root(&spec) };
+    let repo_root = if source_root.exists() {
+        source_root
+    } else {
+        workspace.repo_root(&spec)
+    };
     let reports_root = workspace.artifacts_root(&spec).join("reports");
 
     let line = match action {
@@ -244,8 +285,10 @@ fn run_test_action(
         .load_repo_spec(repo_id)
         .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
     let source_root = workspace.source_root(&spec);
-    let run_upstream = !args.iter().any(|arg| arg == "--conformance") || args.iter().any(|arg| arg == "--upstream");
-    let run_conformance_checks = !args.iter().any(|arg| arg == "--upstream") || args.iter().any(|arg| arg == "--conformance");
+    let run_upstream = !args.iter().any(|arg| arg == "--conformance")
+        || args.iter().any(|arg| arg == "--upstream");
+    let run_conformance_checks = !args.iter().any(|arg| arg == "--upstream")
+        || args.iter().any(|arg| arg == "--conformance");
 
     println!("repo: {}", manifest.id);
     println!("action: test");
@@ -256,7 +299,13 @@ fn run_test_action(
     let reports_root = workspace.artifacts_root(&spec).join("reports");
 
     if execute && run_upstream {
-        execute_recorded_command_line("test", &source_root, &plan.test, &manifest.env, &reports_root)?;
+        execute_recorded_command_line(
+            "test",
+            &source_root,
+            &plan.test,
+            &manifest.env,
+            &reports_root,
+        )?;
         println!("upstream_status: success");
     }
 
@@ -277,7 +326,10 @@ fn run_test_action(
                 HostSessionMode::WindowedDebug,
                 &workspace.artifacts_root(&spec).join("conformance"),
             )?;
-            println!("conformance_launch_request: {}", artifacts.request_path.display());
+            println!(
+                "conformance_launch_request: {}",
+                artifacts.request_path.display()
+            );
             return Ok(());
         };
         if execute {
@@ -407,7 +459,10 @@ fn run_bootstrap(execute: bool) -> Result<(), String> {
     }
 
     println!("bootstrap_packages: {}", plan.packages.join(" "));
-    println!("bootstrap_workspace_shims: {}", plan.workspace_shims.join(" "));
+    println!(
+        "bootstrap_workspace_shims: {}",
+        plan.workspace_shims.join(" ")
+    );
     if execute {
         execute_bootstrap(&plan)?;
         println!("bootstrap_status: success");
@@ -424,7 +479,10 @@ fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!("git {} failed with status {status}", args.join(" ")))
+        Err(format!(
+            "git {} failed with status {status}",
+            args.join(" ")
+        ))
     }
 }
 
@@ -545,8 +603,7 @@ fn resolve_wlroots_ref(series: &str) -> Result<String, String> {
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     refs.sort();
-    refs
-        .into_iter()
+    refs.into_iter()
         .rev()
         .find(|reference| reference.starts_with(series))
         .ok_or_else(|| format!("no wlroots tag found for {series}"))
@@ -579,13 +636,25 @@ fn render_manifest(manifest: &AdapterManifest) -> String {
     output.push_str(&format!("id = {:?}\n", manifest.id));
     output.push_str(&format!("repo = {:?}\n", manifest.repo));
     output.push_str(&format!("rev = {:?}\n", manifest.rev));
-    output.push_str(&format!("build_system = {:?}\n", format_build_system(manifest.build_system)));
-    output.push_str(&format!("configure = {}\n", format_array(&manifest.configure)));
+    output.push_str(&format!(
+        "build_system = {:?}\n",
+        format_build_system(manifest.build_system)
+    ));
+    output.push_str(&format!(
+        "configure = {}\n",
+        format_array(&manifest.configure)
+    ));
     output.push_str(&format!("build = {}\n", format_array(&manifest.build)));
     output.push_str(&format!("test = {}\n", format_array(&manifest.test)));
-    output.push_str(&format!("entrypoint = {}\n", format_array(&manifest.entrypoint)));
+    output.push_str(&format!(
+        "entrypoint = {}\n",
+        format_array(&manifest.entrypoint)
+    ));
     output.push_str(&format!("patch_policy = {:?}\n", manifest.patch_policy));
-    output.push_str(&format!("sdk_features = {}\n", format_array(&manifest.sdk_features)));
+    output.push_str(&format!(
+        "sdk_features = {}\n",
+        format_array(&manifest.sdk_features)
+    ));
     output.push_str(&format!(
         "protocol_expectations = {}\n\n[env]\n",
         format_array(&manifest.protocol_expectations)
@@ -688,7 +757,11 @@ fn find_swiftpm_binary(workspace_root: &Path, name: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.exists())
 }
 
-fn inspect_repo(workspace: &RepoWorkspace, spec: &RepoSpec, manifest: &AdapterManifest) -> SupportReport {
+fn inspect_repo(
+    workspace: &RepoWorkspace,
+    spec: &RepoSpec,
+    manifest: &AdapterManifest,
+) -> SupportReport {
     let mut report = inspect_manifest(manifest);
     let reports_root = workspace.artifacts_root(spec).join("reports");
     report.upstream_tests_pass = load_action_record(&reports_root, "test")

@@ -98,13 +98,11 @@ impl AdapterManifest {
 }
 
 fn take_scalar(map: &mut BTreeMap<String, String>, key: &str) -> Result<String, String> {
-    map.remove(key)
-        .ok_or_else(|| format!("missing {key}"))
+    map.remove(key).ok_or_else(|| format!("missing {key}"))
 }
 
 fn take_array(map: &mut BTreeMap<String, Vec<String>>, key: &str) -> Result<Vec<String>, String> {
-    map.remove(key)
-        .ok_or_else(|| format!("missing {key}"))
+    map.remove(key).ok_or_else(|| format!("missing {key}"))
 }
 
 fn unquote(value: &str) -> String {
@@ -150,4 +148,3 @@ mod tests {
         assert_eq!(manifest.env.get("MACLAND_MODE"), Some(&"1".to_string()));
     }
 }
-

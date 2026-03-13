@@ -63,7 +63,9 @@ impl RepoWorkspace {
         let probe = RepoSpec::new(repo_id, "", None);
         let root = self.repo_root(&probe);
         let url = fs::read_to_string(root.join(".repo-url")).map_err(|err| err.to_string())?;
-        let rev = fs::read_to_string(root.join(".repo-rev")).ok().map(|value| value.trim().to_string());
+        let rev = fs::read_to_string(root.join(".repo-rev"))
+            .ok()
+            .map(|value| value.trim().to_string());
         Ok(RepoSpec::new(repo_id, url.trim(), rev))
     }
 

@@ -144,8 +144,8 @@ pub fn default_session_snapshot() -> SessionSnapshot {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_session_snapshot, BackendEvent, BackendRuntime, FrameMetadata, MockBackendRuntime,
-        RendererKind,
+        BackendEvent, BackendRuntime, FrameMetadata, MockBackendRuntime, RendererKind,
+        default_session_snapshot,
     };
 
     #[test]
