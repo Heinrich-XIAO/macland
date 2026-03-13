@@ -8,6 +8,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var compositorProcess: Process?
     private var managedRuntimeDirectory: URL?
+    private var statusLabel: NSTextField?
 
     public init(configuration: HostLaunchConfiguration) {
         self.configuration = configuration
@@ -30,10 +31,29 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         window.collectionBehavior = [.fullScreenPrimary, .fullScreenAllowsTiling]
         window.backgroundColor = NSColor.black
 
+        let contentView = NSView(frame: frame)
+        contentView.wantsLayer = true
+
         let view = MTKView(frame: frame)
+        view.translatesAutoresizingMaskIntoConstraints = false
         view.clearColor = MTLClearColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1.0)
         view.preferredFramesPerSecond = 60
-        window.contentView = view
+        contentView.addSubview(view)
+
+        let overlay = makeOverlayView()
+        contentView.addSubview(overlay)
+
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            view.topAnchor.constraint(equalTo: contentView.topAnchor),
+            view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            overlay.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
+            overlay.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+        ])
+
+        window.contentView = contentView
 
         self.window = window
         window.makeKeyAndOrderFront(nil)
@@ -74,6 +94,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     private func launchCompositorIfNeeded() {
         guard let executable = configuration.compositorExecutable else {
+            updateStatusLabel("Host ready")
             writeStatus("host_started")
             return
         }
@@ -98,6 +119,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         let statusFile = configuration.statusFile
         let autoExitAfterChild = configuration.autoExitAfterChild
         process.terminationHandler = { process in
+            let status = "Compositor exited with status \(process.terminationStatus)"
             if let statusFile {
                 let payload = StatusEnvelope(
                     status: "child_exit:\(process.terminationStatus)",
@@ -109,6 +131,9 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
                     options: .atomic
                 )
             }
+            Task { @MainActor in
+                self.updateStatusLabel(status)
+            }
             if autoExitAfterChild {
                 Task { @MainActor in
                     NSApp.terminate(nil)
@@ -117,10 +142,13 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         }
 
         do {
+            updateStatusLabel("Launching compositor…")
             try process.run()
             compositorProcess = process
+            updateStatusLabel("Compositor running")
             writeStatus("child_started")
         } catch {
+            updateStatusLabel("Launch failed: \(error.localizedDescription)")
             writeStatus("child_failed:\(error.localizedDescription)")
             if configuration.autoExitAfterChild {
                 Task { @MainActor in
@@ -180,6 +208,61 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         let originX = screenFrame.origin.x + (screenFrame.width - width) / 2
         let originY = screenFrame.origin.y + (screenFrame.height - height) / 2
         return NSRect(x: originX, y: originY, width: width, height: height)
+    }
+
+    private func makeOverlayView() -> NSView {
+        let card = NSVisualEffectView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.material = .hudWindow
+        card.blendingMode = .withinWindow
+        card.state = .active
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 16
+
+        let stack = NSStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+
+        let title = NSTextField(labelWithString: "macland")
+        title.font = NSFont.systemFont(ofSize: 24, weight: .semibold)
+        title.textColor = NSColor.white
+
+        let mode = NSTextField(labelWithString: configuration.mode == .fullscreen ? "Fullscreen host session" : "Windowed debug session")
+        mode.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        mode.textColor = NSColor(calibratedWhite: 0.84, alpha: 1.0)
+
+        let compositor = configuration.compositorExecutable ?? "No compositor executable"
+        let command = ([URL(fileURLWithPath: compositor).lastPathComponent] + configuration.compositorArguments).joined(separator: " ")
+        let commandLabel = NSTextField(wrappingLabelWithString: command)
+        commandLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        commandLabel.textColor = NSColor(calibratedWhite: 0.76, alpha: 1.0)
+        commandLabel.maximumNumberOfLines = 3
+
+        let hint = NSTextField(wrappingLabelWithString: "The host window is live. A black background currently means the compositor launched, but frame presentation into the Metal view is not implemented yet.")
+        hint.font = NSFont.systemFont(ofSize: 12)
+        hint.textColor = NSColor(calibratedWhite: 0.7, alpha: 1.0)
+        hint.maximumNumberOfLines = 4
+
+        let status = NSTextField(labelWithString: "Preparing host…")
+        status.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        status.textColor = NSColor(calibratedRed: 0.56, green: 0.83, blue: 1.0, alpha: 1.0)
+        self.statusLabel = status
+
+        [title, mode, commandLabel, hint, status].forEach(stack.addArrangedSubview)
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
+        ])
+        return card
+    }
+
+    private func updateStatusLabel(_ text: String) {
+        statusLabel?.stringValue = text
     }
 }
 
