@@ -70,6 +70,13 @@ class Manifest:
     patch_policy: str
 
 
+@dataclass
+class HostLaunchArtifacts:
+    request_path: Path
+    status_path: Path
+    runtime_dir: Path
+
+
 def main(argv: list[str]) -> int:
     workspace = detect_workspace_root()
     command = argv[1] if len(argv) > 1 else "help"
@@ -341,11 +348,6 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     execute = "--execute" in args
     manifest = load_manifest(workspace, repo_id)
     source_root = source_dir(workspace, repo_id)
-    env = workspace_command_env(workspace)
-    env.update(manifest.env)
-    runtime_root = source_root if source_root.exists() else workspace
-    if "XDG_RUNTIME_DIR" not in env or not env["XDG_RUNTIME_DIR"]:
-        env["XDG_RUNTIME_DIR"] = str(ensure_runtime_dir(runtime_root))
     mode = "windowed-debug" if "--windowed-debug" in args else "fullscreen"
     print(f"repo: {manifest.repo_id}")
     print(f"mode: {mode}")
@@ -355,7 +357,9 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
 
     if not manifest.entrypoint:
         raise CliError("manifest entrypoint is empty")
-    run_checked(manifest.entrypoint, cwd=source_root if source_root.exists() else workspace, env=env)
+    run_root = source_root if source_root.exists() else workspace
+    artifacts = create_host_launch_request(workspace, manifest, run_root, mode)
+    launch_host(workspace, artifacts)
     write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
 
 
@@ -692,6 +696,65 @@ def workspace_command_env(workspace: Path) -> dict[str, str]:
 
 def ensure_runtime_dir(root: Path) -> Path:
     return Path(tempfile.mkdtemp(prefix="ml", dir="/tmp"))
+
+
+def create_host_launch_request(
+    workspace: Path,
+    manifest: Manifest,
+    run_root: Path,
+    mode: str,
+) -> HostLaunchArtifacts:
+    binary, *arguments = manifest.entrypoint
+    artifacts_root = artifacts_dir(workspace, manifest.repo_id) / "run"
+    artifacts_root.mkdir(parents=True, exist_ok=True)
+    request_path = artifacts_root / "host-launch.json"
+    status_path = artifacts_root / "host-status.txt"
+    runtime_dir = artifacts_root / "runtime"
+    if status_path.exists():
+        status_path.unlink()
+    if runtime_dir.exists():
+        shutil.rmtree(runtime_dir)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(runtime_dir, 0o700)
+
+    env = workspace_command_env(workspace)
+    env.update(manifest.env)
+    env.setdefault("XDG_RUNTIME_DIR", str(runtime_dir))
+    request = {
+        "mode": "windowedDebug" if mode == "windowed-debug" else "fullscreen",
+        "compositorExecutable": str(resolve_binary(run_root, binary)),
+        "compositorArguments": arguments,
+        "environment": env,
+        "permissionHints": ["accessibility", "inputMonitoring"],
+        "workingDirectory": str(run_root),
+        "statusFile": str(status_path),
+        "autoExitAfterChild": True,
+    }
+    request_path.write_text(json.dumps(request, indent=2))
+    return HostLaunchArtifacts(request_path=request_path, status_path=status_path, runtime_dir=runtime_dir)
+
+
+def resolve_binary(run_root: Path, binary: str) -> Path:
+    path = Path(binary)
+    if path.is_absolute() or "/" not in binary:
+        return path
+    return run_root / path
+
+
+def launch_host(workspace: Path, artifacts: HostLaunchArtifacts) -> None:
+    command = host_launch_command(workspace, artifacts.request_path)
+    run_checked(command, cwd=workspace)
+
+
+def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
+    candidates = [
+        workspace / ".build" / "debug" / "macland-host",
+        workspace / ".build" / "arm64-apple-macosx" / "debug" / "macland-host",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return [str(candidate), "--config", str(request_path)]
+    return ["/usr/bin/swift", "run", "macland-host", "--config", str(request_path)]
 
 
 def run_checked(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
