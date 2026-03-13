@@ -147,6 +147,18 @@ const FILES: &[(&str, &str)] = &[
 
 typedef uint32_t drm_magic_t;
 
+typedef struct _drmVersion {
+    int version_major;
+    int version_minor;
+    int version_patchlevel;
+    char* name;
+    int name_len;
+    char* date;
+    int date_len;
+    char* desc;
+    int desc_len;
+} drmVersion, *drmVersionPtr;
+
 #define DRM_NODE_PRIMARY 0
 #define DRM_NODE_CONTROL 1
 #define DRM_NODE_RENDER 2
@@ -231,6 +243,28 @@ static inline void drmFreeDevice(drmDevicePtr* device) {
     *device = NULL;
 }
 
+static inline int drmDevicesEqual(drmDevicePtr a, drmDevicePtr b) {
+    if (a == b) {
+        return 1;
+    }
+    if (!a || !b) {
+        return 0;
+    }
+
+    for (size_t index = 0; index < 4; ++index) {
+        const char* left = a->nodes[index];
+        const char* right = b->nodes[index];
+        if (!left && !right) {
+            continue;
+        }
+        if (!left || !right || strcmp(left, right) != 0) {
+            return 0;
+        }
+    }
+
+    return a->available_nodes == b->available_nodes;
+}
+
 static inline int drmGetNodeTypeFromFd(int fd) {
     (void)fd;
     return DRM_NODE_RENDER;
@@ -259,6 +293,27 @@ static inline int drmGetCap(int fd, uint64_t capability, uint64_t* value) {
     }
     errno = ENOTSUP;
     return -1;
+}
+
+static inline drmVersionPtr drmGetVersion(int fd) {
+    (void)fd;
+    drmVersionPtr version = (drmVersionPtr)calloc(1, sizeof(drmVersion));
+    if (!version) {
+        return NULL;
+    }
+    version->name = strdup("macland-drm");
+    version->name_len = version->name ? (int)strlen(version->name) : 0;
+    return version;
+}
+
+static inline void drmFreeVersion(drmVersionPtr version) {
+    if (!version) {
+        return;
+    }
+    free(version->name);
+    free(version->date);
+    free(version->desc);
+    free(version);
 }
 
 static inline int drmIsMaster(int fd) {
@@ -1493,6 +1548,8 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
         r#"#ifndef LINUX_INPUT_EVENT_CODES_H
 #define LINUX_INPUT_EVENT_CODES_H
 
+#define EV_KEY 0x01
+
 #define KEY_U 22
 #define KEY_I 23
 #define KEY_O 24
@@ -1614,6 +1671,14 @@ static inline int inotify_rm_watch(int fd, int wd) {
 #include <stdint.h>
 #include <time.h>
 
+#if defined(__APPLE__) && !defined(MACLAND_HAVE_ITIMERSPEC)
+#define MACLAND_HAVE_ITIMERSPEC 1
+struct itimerspec {
+    struct timespec it_interval;
+    struct timespec it_value;
+};
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1623,34 +1688,10 @@ extern "C" {
 #define TFD_TIMER_ABSTIME 0x1
 #define TFD_TIMER_CANCEL_ON_SET 0x2
 
-static inline int timerfd_create(int clockid, int flags) {
-    (void)clockid;
-    (void)flags;
-    errno = ENOSYS;
-    return -1;
-}
-
-static inline int timerfd_settime(int fd, int flags, const struct itimerspec* new_value,
-        struct itimerspec* old_value) {
-    (void)fd;
-    (void)flags;
-    (void)new_value;
-    (void)old_value;
-    errno = ENOSYS;
-    return -1;
-}
-
-static inline int timerfd_gettime(int fd, struct itimerspec* curr_value) {
-    (void)fd;
-    if (curr_value) {
-        curr_value->it_interval.tv_sec = 0;
-        curr_value->it_interval.tv_nsec = 0;
-        curr_value->it_value.tv_sec = 0;
-        curr_value->it_value.tv_nsec = 0;
-    }
-    errno = ENOSYS;
-    return -1;
-}
+int timerfd_create(int clockid, int flags);
+int timerfd_settime(int fd, int flags, const struct itimerspec* new_value,
+        struct itimerspec* old_value);
+int timerfd_gettime(int fd, struct itimerspec* curr_value);
 
 #ifdef __cplusplus
 }
@@ -1816,7 +1857,78 @@ Version: 0.0.1
 const STUB_LIBRARIES: &[(&str, &str)] = &[
     (
         "librt.a",
-        r#"int macland_librt_stub(void) {
+        r#"#include <errno.h>
+#include <poll.h>
+#include <signal.h>
+#include <stdint.h>
+#include <time.h>
+#include <unistd.h>
+
+#if defined(__APPLE__) && !defined(MACLAND_HAVE_ITIMERSPEC)
+#define MACLAND_HAVE_ITIMERSPEC 1
+struct itimerspec {
+    struct timespec it_interval;
+    struct timespec it_value;
+};
+#endif
+
+int eventfd(unsigned int initval, int flags) {
+    (void)initval;
+    (void)flags;
+    errno = ENOSYS;
+    return -1;
+}
+
+int epoll_shim_close(int fd) {
+    return close(fd);
+}
+
+ssize_t epoll_shim_read(int fd, void* buf, size_t count) {
+    return read(fd, buf, count);
+}
+
+int epoll_shim_poll(struct pollfd* fds, nfds_t nfds, int timeout) {
+    return poll(fds, nfds, timeout);
+}
+
+int signalfd(int fd, const sigset_t* mask, int flags) {
+    (void)fd;
+    (void)mask;
+    (void)flags;
+    errno = ENOSYS;
+    return -1;
+}
+
+int timerfd_create(int clockid, int flags) {
+    (void)clockid;
+    (void)flags;
+    errno = ENOSYS;
+    return -1;
+}
+
+int timerfd_settime(int fd, int flags, const struct itimerspec* new_value,
+        struct itimerspec* old_value) {
+    (void)fd;
+    (void)flags;
+    (void)new_value;
+    (void)old_value;
+    errno = ENOSYS;
+    return -1;
+}
+
+int timerfd_gettime(int fd, struct itimerspec* curr_value) {
+    (void)fd;
+    if (curr_value) {
+        curr_value->it_interval.tv_sec = 0;
+        curr_value->it_interval.tv_nsec = 0;
+        curr_value->it_value.tv_sec = 0;
+        curr_value->it_value.tv_nsec = 0;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+int macland_librt_stub(void) {
     return 0;
 }
 "#,
@@ -2041,6 +2153,17 @@ mod tests {
         assert!(sysroot.join("include/sys/timerfd.h").exists());
         assert!(sysroot.join("lib/librt.a").exists());
         assert!(sysroot.join("lib/libseat.a").exists());
+        let xf86drm = fs::read_to_string(sysroot.join("include/xf86drm.h")).unwrap();
+        assert!(xf86drm.contains("drmGetVersion"));
+        assert!(xf86drm.contains("drmFreeVersion"));
+        assert!(xf86drm.contains("drmDevicesEqual"));
+        let input_codes =
+            fs::read_to_string(sysroot.join("include/linux/input-event-codes.h")).unwrap();
+        assert!(input_codes.contains("#define EV_KEY 0x01"));
+        let rt_stub = fs::read_to_string(sysroot.join(".stubs/rt.c")).unwrap();
+        assert!(rt_stub.contains("int eventfd("));
+        assert!(rt_stub.contains("int signalfd("));
+        assert!(rt_stub.contains("int timerfd_settime("));
 
         fs::remove_dir_all(&temp).unwrap();
     }
