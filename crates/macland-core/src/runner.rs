@@ -170,6 +170,7 @@ fn merged_include_path(override_value: Option<&String>) -> Option<String> {
         env::var_os("CPATH"),
         override_value,
         &[
+            ".macland/sysroot/include/libepoll-shim",
             ".macland/sysroot/include",
             "/opt/homebrew/include",
             "/opt/homebrew/opt/epoll-shim/include",
@@ -206,6 +207,7 @@ fn merged_preprocessor_flags(override_value: Option<&String>) -> Option<String> 
         env::var_os("CPPFLAGS"),
         override_value,
         &[
+            "-I.macland/sysroot/include/libepoll-shim",
             "-I.macland/sysroot/include",
             "-I/opt/homebrew/include",
             "-I/opt/homebrew/opt/epoll-shim/include",
@@ -222,6 +224,7 @@ fn merged_compile_flags(override_value: Option<&String>) -> Option<String> {
         None,
         override_value,
         &[
+            "-I.macland/sysroot/include/libepoll-shim",
             "-I.macland/sysroot/include",
             "-I/opt/homebrew/include",
             "-I/opt/homebrew/opt/epoll-shim/include",
@@ -238,6 +241,7 @@ fn merged_linker_flags(override_value: Option<&String>) -> Option<String> {
         env::var_os("LDFLAGS"),
         override_value,
         &[
+            "-lrt",
             "-L.macland/sysroot/lib",
             "-L/opt/homebrew/lib",
             "-L/opt/homebrew/opt/epoll-shim/lib",
@@ -325,6 +329,10 @@ fn merge_path_list(
 }
 
 fn resolve_candidate_flag(candidate: &str) -> Option<String> {
+    if !candidate.starts_with("-I") && !candidate.starts_with("-L") {
+        return Some(candidate.to_string());
+    }
+
     let (prefix, path) = candidate.split_at(2);
     let resolved = resolve_candidate_path(path)?;
     Some(format!("{prefix}{resolved}"))
@@ -378,7 +386,8 @@ pub fn execute_recorded_command_line(
 mod tests {
     use super::{
         CommandPlan, execute_command_line, inspect_manifest, merged_include_path,
-        merged_library_path, merged_path_env, merged_pkg_config_path, merged_prefix_path,
+        merged_library_path, merged_linker_flags, merged_path_env, merged_pkg_config_path,
+        merged_prefix_path,
     };
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
@@ -437,5 +446,11 @@ mod tests {
     fn augments_path_with_homebrew_bin() {
         let merged = merged_path_env(None).unwrap();
         assert!(merged.contains("/opt/homebrew/bin"));
+    }
+
+    #[test]
+    fn augments_linker_flags_with_managed_rt() {
+        let merged = merged_linker_flags(None).unwrap();
+        assert!(merged.contains("-lrt"));
     }
 }

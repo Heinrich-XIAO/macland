@@ -87,8 +87,16 @@ const FILES: &[(&str, &str)] = &[
 #define DRM_FORMAT_S410 fourcc_code('S', '4', '1', '0')
 #define DRM_FORMAT_S412 fourcc_code('S', '4', '1', '2')
 #define DRM_FORMAT_S416 fourcc_code('S', '4', '1', '6')
+#define DRM_FORMAT_R16 fourcc_code('R', '1', '6', ' ')
 #define DRM_FORMAT_R16F fourcc_code('R', '1', '6', 'H')
 #define DRM_FORMAT_R32F fourcc_code('R', '3', '2', 'F')
+#define DRM_FORMAT_RG88 fourcc_code('R', 'G', '1', '6')
+#define DRM_FORMAT_RG1616 fourcc_code('R', 'G', '3', '2')
+#define DRM_FORMAT_XRGB16161616 fourcc_code('X', 'R', '4', '8')
+#define DRM_FORMAT_ARGB16161616 fourcc_code('A', 'R', '4', '8')
+#define DRM_FORMAT_XRGB16161616F fourcc_code('X', 'R', '4', 'H')
+#define DRM_FORMAT_ARGB16161616F fourcc_code('A', 'R', '4', 'H')
+#define DRM_FORMAT_GR1616 fourcc_code('G', 'R', '3', '2')
 #define DRM_FORMAT_GR1616F fourcc_code('G', 'R', '2', 'H')
 #define DRM_FORMAT_GR3232F fourcc_code('G', 'R', '2', 'F')
 #define DRM_FORMAT_BGR161616 fourcc_code('B', 'G', '4', '8')
@@ -129,6 +137,7 @@ const FILES: &[(&str, &str)] = &[
 
 #define DRM_FORMAT_MOD_LINEAR 0ULL
 #define DRM_FORMAT_MOD_INVALID ((1ULL << 56) - 1ULL)
+#define DRM_FORMAT_BIG_ENDIAN (1U << 31)
 
 #endif
 "#,
@@ -198,6 +207,11 @@ static inline char* drmGetFormatModifierName(uint64_t modifier) {
     }
     snprintf(out, 19, "0x%016llx", (unsigned long long)modifier);
     return out;
+}
+
+static inline char* drmGetFormatModifierVendor(uint64_t modifier) {
+    (void)modifier;
+    return strdup("macland");
 }
 
 static inline int drmGetDevices2(uint32_t flags, drmDevicePtr devices[], int max_devices) {
@@ -865,6 +879,11 @@ static inline struct gbm_bo* gbm_bo_create_with_modifiers2(struct gbm_device* gb
     return bo;
 }
 
+static inline struct gbm_bo* gbm_bo_create(struct gbm_device* gbm, uint32_t width,
+        uint32_t height, uint32_t format, uint32_t flags) {
+    return gbm_bo_create_with_modifiers2(gbm, width, height, format, NULL, 0, flags);
+}
+
 static inline void gbm_bo_destroy(struct gbm_bo* bo) {
     free(bo);
 }
@@ -1267,6 +1286,13 @@ static inline int libinput_device_config_accel_is_available(struct libinput_devi
     return 0;
 }
 
+static inline uint32_t libinput_device_config_accel_get_profiles(struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT |
+        LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE |
+        LIBINPUT_CONFIG_ACCEL_PROFILE_CUSTOM;
+}
+
 static inline enum libinput_config_accel_profile libinput_device_config_accel_get_profile(
         struct libinput_device* device) {
     (void)device;
@@ -1624,16 +1650,93 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
 "#,
     ),
     (
+        "include/libudev.h",
+        r#"#ifndef LIBUDEV_H
+#define LIBUDEV_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct udev;
+struct udev_device;
+struct udev_enumerate;
+struct udev_list_entry;
+struct udev_monitor;
+
+struct udev* udev_new(void);
+struct udev* udev_unref(struct udev* udev);
+
+struct udev_device* udev_device_new_from_syspath(struct udev* udev, const char* syspath);
+struct udev_device* udev_device_new_from_devnum(struct udev* udev, char type, uint64_t devnum);
+struct udev_device* udev_device_ref(struct udev_device* udev_device);
+struct udev_device* udev_device_unref(struct udev_device* udev_device);
+const char* udev_device_get_syspath(struct udev_device* udev_device);
+const char* udev_device_get_devnode(struct udev_device* udev_device);
+const char* udev_device_get_property_value(struct udev_device* udev_device, const char* key);
+const char* udev_device_get_sysattr_value(struct udev_device* udev_device, const char* key);
+const char* udev_device_get_subsystem(struct udev_device* udev_device);
+const char* udev_device_get_devtype(struct udev_device* udev_device);
+struct udev_device* udev_device_get_parent(struct udev_device* udev_device);
+struct udev_device* udev_device_get_parent_with_subsystem_devtype(
+        struct udev_device* udev_device, const char* subsystem, const char* devtype);
+unsigned long long udev_device_get_seqnum(struct udev_device* udev_device);
+
+struct udev_enumerate* udev_enumerate_new(struct udev* udev);
+struct udev_enumerate* udev_enumerate_unref(struct udev_enumerate* udev_enumerate);
+int udev_enumerate_add_match_subsystem(struct udev_enumerate* udev_enumerate, const char* subsystem);
+int udev_enumerate_add_match_property(struct udev_enumerate* udev_enumerate, const char* property, const char* value);
+int udev_enumerate_add_match_tag(struct udev_enumerate* udev_enumerate, const char* tag);
+int udev_enumerate_scan_devices(struct udev_enumerate* udev_enumerate);
+struct udev_list_entry* udev_enumerate_get_list_entry(struct udev_enumerate* udev_enumerate);
+
+struct udev_list_entry* udev_list_entry_get_next(struct udev_list_entry* list_entry);
+const char* udev_list_entry_get_name(struct udev_list_entry* list_entry);
+const char* udev_list_entry_get_value(struct udev_list_entry* list_entry);
+
+struct udev_monitor* udev_monitor_new_from_netlink(struct udev* udev, const char* name);
+struct udev_monitor* udev_monitor_unref(struct udev_monitor* udev_monitor);
+int udev_monitor_enable_receiving(struct udev_monitor* udev_monitor);
+int udev_monitor_get_fd(struct udev_monitor* udev_monitor);
+int udev_monitor_filter_add_match_subsystem_devtype(
+        struct udev_monitor* udev_monitor, const char* subsystem, const char* devtype);
+struct udev_device* udev_monitor_receive_device(struct udev_monitor* udev_monitor);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+"#,
+    ),
+    (
         "include/linux/input-event-codes.h",
         r#"#ifndef LINUX_INPUT_EVENT_CODES_H
 #define LINUX_INPUT_EVENT_CODES_H
 
 #define EV_KEY 0x01
 
+#define KEY_TAB 15
+#define KEY_BACKSPACE 14
+#define KEY_R 19
+#define KEY_D 32
+#define KEY_S 31
+#define KEY_F 33
+#define KEY_K 37
+#define KEY_SPACE 57
+#define KEY_M 50
 #define KEY_U 22
 #define KEY_I 23
 #define KEY_O 24
 #define KEY_P 25
+#define KEY_F9 67
+#define KEY_F10 68
+#define KEY_UP 103
+#define KEY_LEFT 105
+#define KEY_RIGHT 106
+#define KEY_DOWN 108
 #define KEY_LEFTCTRL 29
 #define KEY_LEFTSHIFT 42
 #define KEY_LEFTALT 56
@@ -1644,6 +1747,8 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
 #define KEY_RIGHTSHIFT 54
 #define KEY_LEFTMETA 125
 #define KEY_RIGHTMETA 126
+#define KEY_BRIGHTNESSDOWN 224
+#define KEY_BRIGHTNESSUP 225
 #define KEY_MAX 0x2ff
 
 #define BTN_LEFT 0x110
@@ -1654,6 +1759,7 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
 #define BTN_FORWARD 0x115
 #define BTN_BACK 0x116
 #define BTN_TASK 0x117
+#define BTN_TOUCH 0x14a
 #define BTN_TOOL_PEN 0x140
 #define BTN_STYLUS 0x14b
 #define BTN_STYLUS2 0x14c
@@ -1668,6 +1774,49 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
 #define MACLAND_LINUX_INPUT_H
 
 #include <linux/input-event-codes.h>
+
+#endif
+"#,
+    ),
+    (
+        "include/linux/ioctl.h",
+        r#"#ifndef MACLAND_LINUX_IOCTL_H
+#define MACLAND_LINUX_IOCTL_H
+
+#include <sys/ioccom.h>
+
+#endif
+"#,
+    ),
+    (
+        "include/linux/limits.h",
+        r#"#ifndef MACLAND_LINUX_LIMITS_H
+#define MACLAND_LINUX_LIMITS_H
+
+#include <limits.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/linux/types.h",
+        r#"#ifndef MACLAND_LINUX_TYPES_H
+#define MACLAND_LINUX_TYPES_H
+
+#include <stdint.h>
+
+typedef int8_t __s8;
+typedef uint8_t __u8;
+typedef int16_t __s16;
+typedef uint16_t __u16;
+typedef int32_t __s32;
+typedef uint32_t __u32;
+typedef int64_t __s64;
+typedef uint64_t __u64;
 
 #endif
 "#,
@@ -1743,6 +1892,44 @@ static inline int inotify_rm_watch(int fd, int wd) {
 "#,
     ),
     (
+        "include/libepoll-shim/sys/timerfd.h",
+        r#"#ifndef MACLAND_LIBEPOLL_SHIM_SYS_TIMERFD_H
+#define MACLAND_LIBEPOLL_SHIM_SYS_TIMERFD_H
+
+#include <errno.h>
+#include <stdint.h>
+#include <time.h>
+
+#if defined(__APPLE__) && !defined(MACLAND_HAVE_ITIMERSPEC)
+#define MACLAND_HAVE_ITIMERSPEC 1
+struct itimerspec {
+    struct timespec it_interval;
+    struct timespec it_value;
+};
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define TFD_CLOEXEC 0x1
+#define TFD_NONBLOCK 0x2
+#define TFD_TIMER_ABSTIME 0x1
+#define TFD_TIMER_CANCEL_ON_SET 0x2
+
+int timerfd_create(int clockid, int flags);
+int timerfd_settime(int fd, int flags, const struct itimerspec* new_value,
+        struct itimerspec* old_value);
+int timerfd_gettime(int fd, struct itimerspec* curr_value);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+"#,
+    ),
+    (
         "include/sys/timerfd.h",
         r#"#ifndef MACLAND_SYS_TIMERFD_H
 #define MACLAND_SYS_TIMERFD_H
@@ -1776,6 +1963,140 @@ int timerfd_gettime(int fd, struct itimerspec* curr_value);
 #ifdef __cplusplus
 }
 #endif
+
+#endif
+"#,
+    ),
+    (
+        "include/time.h",
+        r#"#ifndef MACLAND_TIME_WRAPPER_H
+#define MACLAND_TIME_WRAPPER_H
+
+#include_next <time.h>
+
+#ifndef CLOCK_MONOTONIC_COARSE
+#define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC
+#endif
+
+#ifndef CLOCK_REALTIME_COARSE
+#define CLOCK_REALTIME_COARSE CLOCK_REALTIME
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/endian.h",
+        r#"#ifndef MACLAND_ENDIAN_WRAPPER_H
+#define MACLAND_ENDIAN_WRAPPER_H
+
+#include <machine/endian.h>
+
+#ifndef LITTLE_ENDIAN
+#define LITTLE_ENDIAN __DARWIN_LITTLE_ENDIAN
+#endif
+
+#ifndef BIG_ENDIAN
+#define BIG_ENDIAN __DARWIN_BIG_ENDIAN
+#endif
+
+#ifndef BYTE_ORDER
+#define BYTE_ORDER __DARWIN_BYTE_ORDER
+#endif
+
+#ifndef __LITTLE_ENDIAN
+#define __LITTLE_ENDIAN LITTLE_ENDIAN
+#endif
+
+#ifndef __BIG_ENDIAN
+#define __BIG_ENDIAN BIG_ENDIAN
+#endif
+
+#ifndef __BYTE_ORDER
+#define __BYTE_ORDER BYTE_ORDER
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/values.h",
+        r#"#ifndef MACLAND_VALUES_WRAPPER_H
+#define MACLAND_VALUES_WRAPPER_H
+
+#include <float.h>
+#include <limits.h>
+
+#ifndef MAXINT
+#define MAXINT INT_MAX
+#endif
+
+#ifndef MININT
+#define MININT INT_MIN
+#endif
+
+#ifndef MAXSHORT
+#define MAXSHORT SHRT_MAX
+#endif
+
+#ifndef MINSHORT
+#define MINSHORT SHRT_MIN
+#endif
+
+#ifndef MAXLONG
+#define MAXLONG LONG_MAX
+#endif
+
+#ifndef MINLONG
+#define MINLONG LONG_MIN
+#endif
+
+#ifndef MAXDOUBLE
+#define MAXDOUBLE DBL_MAX
+#endif
+
+#ifndef MINDOUBLE
+#define MINDOUBLE DBL_MIN
+#endif
+
+#ifndef BITSPERBYTE
+#define BITSPERBYTE CHAR_BIT
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/unistd.h",
+        r#"#ifndef MACLAND_UNISTD_WRAPPER_H
+#define MACLAND_UNISTD_WRAPPER_H
+
+#include_next <unistd.h>
+#include <fcntl.h>
+
+static inline int pipe2(int fildes[2], int flags) {
+    if (pipe(fildes) == -1) {
+        return -1;
+    }
+
+    if (flags & O_CLOEXEC) {
+        (void)fcntl(fildes[0], F_SETFD, FD_CLOEXEC);
+        (void)fcntl(fildes[1], F_SETFD, FD_CLOEXEC);
+    }
+
+    if (flags & O_NONBLOCK) {
+        int read_flags = fcntl(fildes[0], F_GETFL, 0);
+        int write_flags = fcntl(fildes[1], F_GETFL, 0);
+        if (read_flags >= 0) {
+            (void)fcntl(fildes[0], F_SETFL, read_flags | O_NONBLOCK);
+        }
+        if (write_flags >= 0) {
+            (void)fcntl(fildes[1], F_SETFL, write_flags | O_NONBLOCK);
+        }
+    }
+
+    return 0;
+}
 
 #endif
 "#,
@@ -1938,8 +2259,10 @@ const STUB_LIBRARIES: &[(&str, &str)] = &[
     (
         "librt.a",
         r#"#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
@@ -1959,8 +2282,30 @@ int eventfd(unsigned int initval, int flags) {
     return -1;
 }
 
+int epoll_create(int size) {
+    (void)size;
+    errno = ENOSYS;
+    return -1;
+}
+
+int epoll_create1(int flags) {
+    (void)flags;
+    errno = ENOSYS;
+    return -1;
+}
+
 int epoll_shim_close(int fd) {
     return close(fd);
+}
+
+int epoll_shim_fcntl(int fd, int cmd, ...) {
+    va_list args;
+    int result;
+
+    va_start(args, cmd);
+    result = fcntl(fd, cmd, va_arg(args, long));
+    va_end(args);
+    return result;
 }
 
 ssize_t epoll_shim_read(int fd, void* buf, size_t count) {
@@ -2506,12 +2851,21 @@ mod tests {
         assert!(sysroot.join("include/drm_fourcc.h").exists());
         assert!(sysroot.join("include/gbm.h").exists());
         assert!(sysroot.join("include/libinput.h").exists());
+        assert!(sysroot.join("include/libudev.h").exists());
         assert!(sysroot.join("include/libseat.h").exists());
         assert!(sysroot.join("include/libevdev/libevdev.h").exists());
+        assert!(sysroot.join("include/endian.h").exists());
+        assert!(sysroot.join("include/time.h").exists());
+        assert!(sysroot.join("include/values.h").exists());
         assert!(sysroot.join("include/linux/input-event-codes.h").exists());
         assert!(sysroot.join("include/linux/input.h").exists());
+        assert!(sysroot.join("include/linux/ioctl.h").exists());
+        assert!(sysroot.join("include/linux/limits.h").exists());
+        assert!(sysroot.join("include/linux/types.h").exists());
+        assert!(sysroot.join("include/unistd.h").exists());
         assert!(sysroot.join("include/sys/inotify.h").exists());
         assert!(sysroot.join("include/sys/timerfd.h").exists());
+        assert!(sysroot.join("include/libepoll-shim/sys/timerfd.h").exists());
         assert!(sysroot.join("lib/librt.a").exists());
         assert!(sysroot.join("lib/libinput.a").exists());
         assert!(sysroot.join("lib/libudev.a").exists());
@@ -2519,10 +2873,21 @@ mod tests {
         assert!(sysroot.join("lib/libgbm.a").exists());
         assert!(sysroot.join("lib/libdrm.a").exists());
         assert!(sysroot.join("lib/libseat.a").exists());
+        let drm_fourcc = fs::read_to_string(sysroot.join("include/drm_fourcc.h")).unwrap();
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_R16 "));
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_RG88 "));
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_RG1616 "));
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_GR1616 "));
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_XRGB16161616 "));
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_ARGB16161616 "));
+        assert!(drm_fourcc.contains("#define DRM_FORMAT_BIG_ENDIAN"));
         let xf86drm = fs::read_to_string(sysroot.join("include/xf86drm.h")).unwrap();
         assert!(xf86drm.contains("drmGetVersion"));
         assert!(xf86drm.contains("drmFreeVersion"));
         assert!(xf86drm.contains("drmDevicesEqual"));
+        assert!(xf86drm.contains("drmGetFormatModifierVendor"));
+        let gbm = fs::read_to_string(sysroot.join("include/gbm.h")).unwrap();
+        assert!(gbm.contains("gbm_bo_create("));
         let xf86drmmode = fs::read_to_string(sysroot.join("include/xf86drmMode.h")).unwrap();
         assert!(xf86drmmode.contains("typedef enum drmModeConnection"));
         assert!(xf86drmmode.contains("typedef struct _drmModePlane"));
@@ -2533,15 +2898,52 @@ mod tests {
         assert!(xf86drmmode.contains("#define DRM_MODE_CONTENT_TYPE_GAME 4"));
         let input_codes =
             fs::read_to_string(sysroot.join("include/linux/input-event-codes.h")).unwrap();
+        assert!(input_codes.contains("#define KEY_TAB 15"));
+        assert!(input_codes.contains("#define KEY_BACKSPACE 14"));
+        assert!(input_codes.contains("#define KEY_D 32"));
+        assert!(input_codes.contains("#define KEY_R 19"));
+        assert!(input_codes.contains("#define KEY_S 31"));
+        assert!(input_codes.contains("#define KEY_SPACE 57"));
+        assert!(input_codes.contains("#define KEY_M 50"));
+        assert!(input_codes.contains("#define KEY_BRIGHTNESSDOWN 224"));
         assert!(input_codes.contains("#define EV_KEY 0x01"));
+        assert!(input_codes.contains("#define BTN_TOUCH 0x14a"));
+        let linux_ioctl = fs::read_to_string(sysroot.join("include/linux/ioctl.h")).unwrap();
+        assert!(linux_ioctl.contains("#include <sys/ioccom.h>"));
+        let linux_limits = fs::read_to_string(sysroot.join("include/linux/limits.h")).unwrap();
+        assert!(linux_limits.contains("#include <limits.h>"));
+        let linux_types = fs::read_to_string(sysroot.join("include/linux/types.h")).unwrap();
+        assert!(linux_types.contains("typedef uint64_t __u64;"));
+        let unistd_wrapper = fs::read_to_string(sysroot.join("include/unistd.h")).unwrap();
+        assert!(unistd_wrapper.contains("static inline int pipe2"));
         let libinput = fs::read_to_string(sysroot.join("include/libinput.h")).unwrap();
+        assert!(libinput.contains("libinput_device_config_accel_get_profiles"));
         assert!(libinput.contains("LIBINPUT_CONFIG_ACCEL_PROFILE_CUSTOM = 3"));
         assert!(libinput.contains(
             "libinput_config_accel_create(\n        enum libinput_config_accel_profile profile)"
         ));
         assert!(libinput.contains("enum libinput_accel_type type, double step"));
+        let libudev = fs::read_to_string(sysroot.join("include/libudev.h")).unwrap();
+        assert!(libudev.contains("struct udev_monitor;"));
+        assert!(libudev.contains("udev_monitor_receive_device"));
+        let time_wrapper = fs::read_to_string(sysroot.join("include/time.h")).unwrap();
+        assert!(time_wrapper.contains("#define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC"));
+        assert!(time_wrapper.contains("#define CLOCK_REALTIME_COARSE CLOCK_REALTIME"));
+        let endian_wrapper = fs::read_to_string(sysroot.join("include/endian.h")).unwrap();
+        assert!(endian_wrapper.contains("#define __BYTE_ORDER BYTE_ORDER"));
+        assert!(endian_wrapper.contains("#define __LITTLE_ENDIAN LITTLE_ENDIAN"));
+        let values_wrapper = fs::read_to_string(sysroot.join("include/values.h")).unwrap();
+        assert!(values_wrapper.contains("#define MAXINT INT_MAX"));
+        assert!(values_wrapper.contains("#define BITSPERBYTE CHAR_BIT"));
+        let timerfd_wrapper =
+            fs::read_to_string(sysroot.join("include/libepoll-shim/sys/timerfd.h")).unwrap();
+        assert!(timerfd_wrapper.contains("struct itimerspec"));
+        assert!(timerfd_wrapper.contains("int timerfd_settime("));
         let rt_stub = fs::read_to_string(sysroot.join(".stubs/rt.c")).unwrap();
         assert!(rt_stub.contains("int eventfd("));
+        assert!(rt_stub.contains("int epoll_create("));
+        assert!(rt_stub.contains("int epoll_create1("));
+        assert!(rt_stub.contains("int epoll_shim_fcntl("));
         assert!(rt_stub.contains("int signalfd("));
         assert!(rt_stub.contains("int timerfd_settime("));
 
