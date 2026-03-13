@@ -1,5 +1,7 @@
 use crate::doctor::DoctorReport;
-use crate::workspace_shims::{DEPENDENCIES as WORKSPACE_SHIM_DEPENDENCIES, install_workspace_shims};
+use crate::workspace_shims::{
+    DEPENDENCIES as WORKSPACE_SHIM_DEPENDENCIES, install_workspace_shims,
+};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,7 +42,7 @@ impl BootstrapPlan {
                 "xcursor" => Some("libxcursor"),
                 "re2" => Some("re2"),
                 "muparser" => Some("muparser"),
-                "libdrm" | "gbm" | "libinput" | "libudev" => None,
+                "libdrm" | "gbm" | "libinput" | "libevdev" | "libudev" => None,
                 _ => None,
             };
             if let Some(package) = package {
@@ -48,7 +50,9 @@ impl BootstrapPlan {
                     packages.push(package);
                 }
             }
-            if WORKSPACE_SHIM_DEPENDENCIES.contains(&dependency) && !workspace_shims.contains(&dependency) {
+            if WORKSPACE_SHIM_DEPENDENCIES.contains(&dependency)
+                && !workspace_shims.contains(&dependency)
+            {
                 workspace_shims.push(dependency);
             }
         }
@@ -65,7 +69,9 @@ impl BootstrapPlan {
 
 pub fn execute_bootstrap(plan: &BootstrapPlan) -> Result<(), String> {
     if !plan.packages.is_empty() {
-        if !Path::new("/opt/homebrew/bin/brew").exists() && !Path::new("/usr/local/bin/brew").exists() {
+        if !Path::new("/opt/homebrew/bin/brew").exists()
+            && !Path::new("/usr/local/bin/brew").exists()
+        {
             return Err(format!(
                 "homebrew is required to install missing packages: {}",
                 plan.packages.join(", ")
@@ -139,6 +145,11 @@ mod tests {
                     found: false,
                     detail: "missing".to_string(),
                 },
+                NativeDependencyStatus {
+                    name: "libevdev",
+                    found: false,
+                    detail: "missing".to_string(),
+                },
             ],
             host: HostStatus {
                 apple_silicon: true,
@@ -148,7 +159,10 @@ mod tests {
         };
 
         let plan = BootstrapPlan::from_doctor(&report);
-        assert_eq!(plan.packages, vec!["meson", "ninja", "libxkbcommon", "mesa"]);
-        assert_eq!(plan.workspace_shims, vec!["libudev"]);
+        assert_eq!(
+            plan.packages,
+            vec!["meson", "ninja", "libxkbcommon", "mesa"]
+        );
+        assert_eq!(plan.workspace_shims, vec!["libudev", "libevdev"]);
     }
 }

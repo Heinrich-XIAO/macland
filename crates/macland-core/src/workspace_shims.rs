@@ -266,6 +266,865 @@ static inline int drmCloseBufferHandle(int fd, uint32_t handle) {
 "#,
     ),
     (
+        "include/gbm.h",
+        r#"#ifndef GBM_H
+#define GBM_H
+
+#include <stdint.h>
+#include <stdlib.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define GBM_BO_USE_RENDERING (1U << 0)
+#define GBM_BO_USE_SCANOUT (1U << 1)
+#define GBM_BO_USE_LINEAR (1U << 2)
+#define GBM_FORMAT_XRGB8888 0x34325258U
+#define GBM_FORMAT_ARGB8888 0x34325241U
+#define GBM_FORMAT_XBGR8888 0x34324258U
+#define GBM_FORMAT_ABGR8888 0x34324241U
+
+struct gbm_device {
+    int fd;
+};
+
+struct gbm_bo {
+    uint32_t width;
+    uint32_t height;
+    uint32_t format;
+    uint64_t modifier;
+};
+
+union gbm_bo_handle {
+    void* ptr;
+    int32_t s32;
+    uint32_t u32;
+    int64_t s64;
+    uint64_t u64;
+};
+
+static inline struct gbm_device* gbm_create_device(int fd) {
+    struct gbm_device* device = (struct gbm_device*)calloc(1, sizeof(struct gbm_device));
+    if (device) {
+        device->fd = fd;
+    }
+    return device;
+}
+
+static inline void gbm_device_destroy(struct gbm_device* device) {
+    free(device);
+}
+
+static inline int gbm_device_get_fd(struct gbm_device* device) {
+    return device ? device->fd : -1;
+}
+
+static inline struct gbm_bo* gbm_bo_create_with_modifiers2(struct gbm_device* gbm, uint32_t width,
+        uint32_t height, uint32_t format, const uint64_t* modifiers, const unsigned int count,
+        uint32_t flags) {
+    (void)gbm;
+    (void)modifiers;
+    (void)count;
+    (void)flags;
+    struct gbm_bo* bo = (struct gbm_bo*)calloc(1, sizeof(struct gbm_bo));
+    if (bo) {
+        bo->width = width;
+        bo->height = height;
+        bo->format = format;
+    }
+    return bo;
+}
+
+static inline void gbm_bo_destroy(struct gbm_bo* bo) {
+    free(bo);
+}
+
+static inline union gbm_bo_handle gbm_bo_get_handle(struct gbm_bo* bo) {
+    union gbm_bo_handle handle = {0};
+    (void)bo;
+    return handle;
+}
+
+static inline uint32_t gbm_bo_get_width(struct gbm_bo* bo) {
+    return bo ? bo->width : 0;
+}
+
+static inline uint32_t gbm_bo_get_height(struct gbm_bo* bo) {
+    return bo ? bo->height : 0;
+}
+
+static inline uint32_t gbm_bo_get_stride(struct gbm_bo* bo) {
+    (void)bo;
+    return 0;
+}
+
+static inline uint32_t gbm_bo_get_stride_for_plane(struct gbm_bo* bo, int plane) {
+    (void)bo;
+    (void)plane;
+    return 0;
+}
+
+static inline uint32_t gbm_bo_get_offset(struct gbm_bo* bo, int plane) {
+    (void)bo;
+    (void)plane;
+    return 0;
+}
+
+static inline int gbm_bo_get_plane_count(struct gbm_bo* bo) {
+    (void)bo;
+    return 1;
+}
+
+static inline uint32_t gbm_bo_get_format(struct gbm_bo* bo) {
+    return bo ? bo->format : 0;
+}
+
+static inline uint64_t gbm_bo_get_modifier(struct gbm_bo* bo) {
+    return bo ? bo->modifier : 0;
+}
+
+static inline int gbm_bo_get_fd(struct gbm_bo* bo) {
+    (void)bo;
+    return -1;
+}
+
+static inline int gbm_bo_get_fd_for_plane(struct gbm_bo* bo, int plane) {
+    (void)bo;
+    (void)plane;
+    return -1;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/libinput.h",
+        r#"#ifndef LIBINPUT_H
+#define LIBINPUT_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct udev_device;
+struct libinput;
+struct libinput_device {
+    const char* name;
+};
+struct libinput_device_group;
+struct libinput_config_accel;
+
+enum libinput_config_status {
+    LIBINPUT_CONFIG_STATUS_SUCCESS = 0,
+    LIBINPUT_CONFIG_STATUS_UNSUPPORTED = 1,
+    LIBINPUT_CONFIG_STATUS_INVALID = 2,
+};
+
+enum libinput_device_capability {
+    LIBINPUT_DEVICE_CAP_KEYBOARD = 0,
+    LIBINPUT_DEVICE_CAP_POINTER = 1,
+    LIBINPUT_DEVICE_CAP_TOUCH = 2,
+    LIBINPUT_DEVICE_CAP_TABLET_TOOL = 3,
+    LIBINPUT_DEVICE_CAP_TABLET_PAD = 4,
+    LIBINPUT_DEVICE_CAP_GESTURE = 5,
+    LIBINPUT_DEVICE_CAP_SWITCH = 6,
+};
+
+enum libinput_config_accel_profile {
+    LIBINPUT_CONFIG_ACCEL_PROFILE_NONE = 0,
+    LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT = 1,
+    LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE = 2,
+    LIBINPUT_CONFIG_ACCEL_PROFILE_CUSTOM = 3,
+};
+
+enum libinput_config_click_method {
+    LIBINPUT_CONFIG_CLICK_METHOD_NONE = 0,
+    LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS = 1 << 0,
+    LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER = 1 << 1,
+};
+
+enum libinput_config_clickfinger_button_map {
+    LIBINPUT_CONFIG_CLICKFINGER_MAP_LRM = 0,
+    LIBINPUT_CONFIG_CLICKFINGER_MAP_LMR = 1,
+};
+
+enum libinput_config_tap_state {
+    LIBINPUT_CONFIG_TAP_DISABLED = 0,
+    LIBINPUT_CONFIG_TAP_ENABLED = 1,
+};
+
+enum libinput_config_tap_button_map {
+    LIBINPUT_CONFIG_TAP_MAP_LRM = 0,
+    LIBINPUT_CONFIG_TAP_MAP_LMR = 1,
+};
+
+enum libinput_config_drag_state {
+    LIBINPUT_CONFIG_DRAG_DISABLED = 0,
+    LIBINPUT_CONFIG_DRAG_ENABLED = 1,
+};
+
+enum libinput_config_drag_lock_state {
+    LIBINPUT_CONFIG_DRAG_LOCK_DISABLED = 0,
+    LIBINPUT_CONFIG_DRAG_LOCK_ENABLED = 1,
+    LIBINPUT_CONFIG_DRAG_LOCK_ENABLED_STICKY = 2,
+};
+
+enum libinput_config_dwt_state {
+    LIBINPUT_CONFIG_DWT_DISABLED = 0,
+    LIBINPUT_CONFIG_DWT_ENABLED = 1,
+};
+
+enum libinput_config_dwtp_state {
+    LIBINPUT_CONFIG_DWTP_DISABLED = 0,
+    LIBINPUT_CONFIG_DWTP_ENABLED = 1,
+};
+
+enum libinput_config_middle_emulation_state {
+    LIBINPUT_CONFIG_MIDDLE_EMULATION_DISABLED = 0,
+    LIBINPUT_CONFIG_MIDDLE_EMULATION_ENABLED = 1,
+};
+
+enum libinput_config_scroll_method {
+    LIBINPUT_CONFIG_SCROLL_NO_SCROLL = 0,
+    LIBINPUT_CONFIG_SCROLL_2FG = 1 << 0,
+    LIBINPUT_CONFIG_SCROLL_EDGE = 1 << 1,
+    LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN = 1 << 2,
+};
+
+enum libinput_config_scroll_button_lock_state {
+    LIBINPUT_CONFIG_SCROLL_BUTTON_LOCK_DISABLED = 0,
+    LIBINPUT_CONFIG_SCROLL_BUTTON_LOCK_ENABLED = 1,
+};
+
+enum libinput_config_send_events_mode {
+    LIBINPUT_CONFIG_SEND_EVENTS_ENABLED = 0,
+    LIBINPUT_CONFIG_SEND_EVENTS_DISABLED = 1 << 0,
+    LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE = 1 << 1,
+};
+
+enum libinput_config_3fg_drag_state {
+    LIBINPUT_CONFIG_3FG_DRAG_DISABLED = 0,
+    LIBINPUT_CONFIG_3FG_DRAG_ENABLED_3FG = 1,
+    LIBINPUT_CONFIG_3FG_DRAG_ENABLED_4FG = 2,
+};
+
+enum libinput_accel_type {
+    LIBINPUT_ACCEL_TYPE_MOTION = 0,
+    LIBINPUT_ACCEL_TYPE_SCROLL = 1,
+};
+
+enum libinput_switch {
+    LIBINPUT_SWITCH_LID = 0,
+    LIBINPUT_SWITCH_TABLET_MODE = 1,
+    LIBINPUT_SWITCH_KEYPAD_SLIDE = 2,
+};
+
+static inline const char* libinput_config_status_to_str(enum libinput_config_status status) {
+    switch (status) {
+    case LIBINPUT_CONFIG_STATUS_SUCCESS:
+        return "success";
+    case LIBINPUT_CONFIG_STATUS_UNSUPPORTED:
+        return "unsupported";
+    default:
+        return "invalid";
+    }
+}
+
+static inline int libinput_device_has_capability(struct libinput_device* device,
+        enum libinput_device_capability capability) {
+    (void)device;
+    (void)capability;
+    return 0;
+}
+
+static inline int libinput_device_get_size(struct libinput_device* device, double* width, double* height) {
+    (void)device;
+    if (width) {
+        *width = 0.0;
+    }
+    if (height) {
+        *height = 0.0;
+    }
+    return 0;
+}
+
+static inline int libinput_device_config_tap_get_finger_count(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_tap_set_enabled(
+        struct libinput_device* device, enum libinput_config_tap_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_tap_state libinput_device_config_tap_get_enabled(struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_TAP_DISABLED;
+}
+
+static inline enum libinput_config_tap_state libinput_device_config_tap_get_default_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_TAP_DISABLED;
+}
+
+static inline enum libinput_config_status libinput_device_config_tap_set_button_map(
+        struct libinput_device* device, enum libinput_config_tap_button_map map) {
+    (void)device;
+    (void)map;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_tap_button_map libinput_device_config_tap_get_button_map(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_TAP_MAP_LRM;
+}
+
+static inline enum libinput_config_tap_button_map libinput_device_config_tap_get_default_button_map(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_TAP_MAP_LRM;
+}
+
+static inline enum libinput_config_status libinput_device_config_tap_set_drag_enabled(
+        struct libinput_device* device, enum libinput_config_drag_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_drag_state libinput_device_config_tap_get_drag_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DRAG_DISABLED;
+}
+
+static inline enum libinput_config_drag_state libinput_device_config_tap_get_default_drag_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DRAG_DISABLED;
+}
+
+static inline enum libinput_config_status libinput_device_config_tap_set_drag_lock_enabled(
+        struct libinput_device* device, enum libinput_config_drag_lock_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_drag_lock_state libinput_device_config_tap_get_drag_lock_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DRAG_LOCK_DISABLED;
+}
+
+static inline enum libinput_config_drag_lock_state libinput_device_config_tap_get_default_drag_lock_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DRAG_LOCK_DISABLED;
+}
+
+static inline int libinput_device_config_left_handed_is_available(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_left_handed_set(
+        struct libinput_device* device, int enabled) {
+    (void)device;
+    (void)enabled;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline int libinput_device_config_left_handed_get(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline int libinput_device_config_left_handed_get_default(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline int libinput_device_config_middle_emulation_is_available(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_middle_emulation_set_enabled(
+        struct libinput_device* device, enum libinput_config_middle_emulation_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_middle_emulation_state libinput_device_config_middle_emulation_get_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_MIDDLE_EMULATION_DISABLED;
+}
+
+static inline enum libinput_config_middle_emulation_state
+libinput_device_config_middle_emulation_get_default_enabled(struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_MIDDLE_EMULATION_DISABLED;
+}
+
+static inline int libinput_device_config_dwt_is_available(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_dwt_set_enabled(
+        struct libinput_device* device, enum libinput_config_dwt_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_dwt_state libinput_device_config_dwt_get_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DWT_DISABLED;
+}
+
+static inline enum libinput_config_dwt_state libinput_device_config_dwt_get_default_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DWT_DISABLED;
+}
+
+static inline int libinput_device_config_dwtp_is_available(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_dwtp_set_enabled(
+        struct libinput_device* device, enum libinput_config_dwtp_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_dwtp_state libinput_device_config_dwtp_get_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DWTP_DISABLED;
+}
+
+static inline enum libinput_config_dwtp_state libinput_device_config_dwtp_get_default_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_DWTP_DISABLED;
+}
+
+static inline int libinput_device_config_accel_is_available(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_accel_profile libinput_device_config_accel_get_profile(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
+}
+
+static inline enum libinput_config_accel_profile libinput_device_config_accel_get_default_profile(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
+}
+
+static inline enum libinput_config_status libinput_device_config_accel_set_profile(
+        struct libinput_device* device, enum libinput_config_accel_profile profile) {
+    (void)device;
+    (void)profile;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline double libinput_device_config_accel_get_speed(struct libinput_device* device) {
+    (void)device;
+    return 0.0;
+}
+
+static inline double libinput_device_config_accel_get_default_speed(struct libinput_device* device) {
+    (void)device;
+    return 0.0;
+}
+
+static inline enum libinput_config_status libinput_device_config_accel_set_speed(
+        struct libinput_device* device, double speed) {
+    (void)device;
+    (void)speed;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline struct libinput_config_accel* libinput_config_accel_create(enum libinput_accel_type type) {
+    (void)type;
+    return (struct libinput_config_accel*)0;
+}
+
+static inline enum libinput_config_status libinput_config_accel_set_points(
+        struct libinput_config_accel* accel, size_t count, const double* x, const double* y) {
+    (void)accel;
+    (void)count;
+    (void)x;
+    (void)y;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_status libinput_device_config_accel_apply(
+        struct libinput_device* device, struct libinput_config_accel* accel) {
+    (void)device;
+    (void)accel;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline void libinput_config_accel_destroy(struct libinput_config_accel* accel) {
+    (void)accel;
+}
+
+static inline int libinput_device_config_rotation_is_available(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_rotation_set_angle(
+        struct libinput_device* device, unsigned int angle) {
+    (void)device;
+    (void)angle;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline unsigned int libinput_device_config_rotation_get_angle(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline unsigned int libinput_device_config_rotation_get_default_angle(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline int libinput_device_config_scroll_has_natural_scroll(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline int libinput_device_config_scroll_get_natural_scroll_enabled(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline int libinput_device_config_scroll_get_default_natural_scroll_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_scroll_set_natural_scroll_enabled(
+        struct libinput_device* device, int enabled) {
+    (void)device;
+    (void)enabled;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline uint32_t libinput_device_config_scroll_get_methods(struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SCROLL_NO_SCROLL;
+}
+
+static inline enum libinput_config_scroll_method libinput_device_config_scroll_get_method(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SCROLL_NO_SCROLL;
+}
+
+static inline enum libinput_config_scroll_method libinput_device_config_scroll_get_default_method(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SCROLL_NO_SCROLL;
+}
+
+static inline enum libinput_config_status libinput_device_config_scroll_set_method(
+        struct libinput_device* device, enum libinput_config_scroll_method method) {
+    (void)device;
+    (void)method;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline uint32_t libinput_device_config_scroll_get_button(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline uint32_t libinput_device_config_scroll_get_default_button(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_status libinput_device_config_scroll_set_button(
+        struct libinput_device* device, uint32_t button) {
+    (void)device;
+    (void)button;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_scroll_button_lock_state libinput_device_config_scroll_get_button_lock(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SCROLL_BUTTON_LOCK_DISABLED;
+}
+
+static inline enum libinput_config_status libinput_device_config_scroll_set_button_lock(
+        struct libinput_device* device, enum libinput_config_scroll_button_lock_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline uint32_t libinput_device_config_send_events_get_modes(struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SEND_EVENTS_ENABLED;
+}
+
+static inline enum libinput_config_send_events_mode libinput_device_config_send_events_get_mode(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SEND_EVENTS_ENABLED;
+}
+
+static inline enum libinput_config_send_events_mode libinput_device_config_send_events_get_default_mode(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_SEND_EVENTS_ENABLED;
+}
+
+static inline enum libinput_config_status libinput_device_config_send_events_set_mode(
+        struct libinput_device* device, enum libinput_config_send_events_mode mode) {
+    (void)device;
+    (void)mode;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline int libinput_device_config_calibration_has_matrix(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline int libinput_device_config_calibration_get_matrix(struct libinput_device* device, float matrix[6]) {
+    (void)device;
+    if (matrix) {
+        for (int i = 0; i < 6; ++i) {
+            matrix[i] = 0.0f;
+        }
+    }
+    return 0;
+}
+
+static inline int libinput_device_config_calibration_get_default_matrix(
+        struct libinput_device* device, float matrix[6]) {
+    return libinput_device_config_calibration_get_matrix(device, matrix);
+}
+
+static inline enum libinput_config_status libinput_device_config_calibration_set_matrix(
+        struct libinput_device* device, const float matrix[6]) {
+    (void)device;
+    (void)matrix;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_click_method libinput_device_config_click_get_methods(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_CLICK_METHOD_NONE;
+}
+
+static inline enum libinput_config_click_method libinput_device_config_click_get_method(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_CLICK_METHOD_NONE;
+}
+
+static inline enum libinput_config_click_method libinput_device_config_click_get_default_method(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_CLICK_METHOD_NONE;
+}
+
+static inline enum libinput_config_status libinput_device_config_click_set_method(
+        struct libinput_device* device, enum libinput_config_click_method method) {
+    (void)device;
+    (void)method;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline enum libinput_config_clickfinger_button_map libinput_device_config_click_get_clickfinger_button_map(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_CLICKFINGER_MAP_LRM;
+}
+
+static inline enum libinput_config_clickfinger_button_map
+libinput_device_config_click_get_default_clickfinger_button_map(struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_CLICKFINGER_MAP_LRM;
+}
+
+static inline enum libinput_config_status libinput_device_config_click_set_clickfinger_button_map(
+        struct libinput_device* device, enum libinput_config_clickfinger_button_map map) {
+    (void)device;
+    (void)map;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline int libinput_device_config_3fg_drag_get_finger_count(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline enum libinput_config_3fg_drag_state libinput_device_config_3fg_drag_get_default_enabled(
+        struct libinput_device* device) {
+    (void)device;
+    return LIBINPUT_CONFIG_3FG_DRAG_DISABLED;
+}
+
+static inline enum libinput_config_status libinput_device_config_3fg_drag_set_enabled(
+        struct libinput_device* device, enum libinput_config_3fg_drag_state state) {
+    (void)device;
+    (void)state;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static inline const char* libinput_device_get_name(struct libinput_device* device) {
+    return (device && device->name) ? device->name : "macland-libinput";
+}
+
+static inline const char* libinput_device_get_sysname(struct libinput_device* device) {
+    return libinput_device_get_name(device);
+}
+
+static inline uint32_t libinput_device_get_id_vendor(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline uint32_t libinput_device_get_id_product(struct libinput_device* device) {
+    (void)device;
+    return 0;
+}
+
+static inline struct libinput_device_group* libinput_device_get_device_group(struct libinput_device* device) {
+    (void)device;
+    return (struct libinput_device_group*)0;
+}
+
+static inline struct udev_device* libinput_device_get_udev_device(struct libinput_device* device) {
+    (void)device;
+    return (struct udev_device*)0;
+}
+
+static inline struct libinput_device* libinput_get_device_handle(void* device) {
+    return (struct libinput_device*)device;
+}
+
+static inline bool libinput_device_is_builtin(struct libinput_device* device) {
+    (void)device;
+    return false;
+}
+
+static inline enum libinput_config_status libinput_device_send_events(
+        struct libinput_device* device, enum libinput_config_send_events_mode mode) {
+    (void)device;
+    (void)mode;
+    return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/libevdev/libevdev.h",
+        r#"#ifndef LIBEVDEV_H
+#define LIBEVDEV_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+static inline const char* libevdev_event_code_get_name(unsigned int type, unsigned int code) {
+    (void)type;
+    (void)code;
+    return "macland-event";
+}
+
+static inline int libevdev_event_code_from_name(unsigned int type, const char* name) {
+    (void)type;
+    (void)name;
+    return -1;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+"#,
+    ),
+    (
+        "include/linux/input-event-codes.h",
+        r#"#ifndef LINUX_INPUT_EVENT_CODES_H
+#define LINUX_INPUT_EVENT_CODES_H
+
+#define KEY_U 22
+#define KEY_I 23
+#define KEY_O 24
+#define KEY_P 25
+#define KEY_LEFTCTRL 29
+#define KEY_LEFTSHIFT 42
+#define KEY_LEFTALT 56
+#define KEY_CAPSLOCK 58
+#define KEY_NUMLOCK 69
+#define KEY_RIGHTCTRL 97
+#define KEY_RIGHTALT 100
+#define KEY_RIGHTSHIFT 54
+#define KEY_LEFTMETA 125
+#define KEY_RIGHTMETA 126
+#define KEY_MAX 0x2ff
+
+#define BTN_LEFT 0x110
+#define BTN_RIGHT 0x111
+#define BTN_MIDDLE 0x112
+#define BTN_SIDE 0x113
+#define BTN_EXTRA 0x114
+#define BTN_FORWARD 0x115
+#define BTN_BACK 0x116
+#define BTN_TASK 0x117
+#define BTN_TOOL_PEN 0x140
+#define BTN_STYLUS 0x14b
+#define BTN_STYLUS2 0x14c
+#define BTN_STYLUS3 0x149
+
+#endif
+"#,
+    ),
+    (
         "include/sys/eventfd.h",
         r#"#ifndef MACLAND_SYS_EVENTFD_H
 #define MACLAND_SYS_EVENTFD_H
@@ -348,6 +1207,20 @@ includedir=${prefix}/include
 Name: libudev
 Description: macland compatibility shim for libudev discovery
 Version: 255.99
+Cflags: -I${includedir}
+Libs:
+"#,
+    ),
+    (
+        "lib/pkgconfig/libevdev.pc",
+        r#"prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libevdev
+Description: macland compatibility shim for libevdev discovery
+Version: 1.13.99
 Cflags: -I${includedir}
 Libs:
 "#,
@@ -544,7 +1417,9 @@ void libseat_set_log_level(enum libseat_log_level level) {
     ),
 ];
 
-pub const DEPENDENCIES: &[&str] = &["libdrm", "gbm", "libinput", "libudev", "libseat"];
+pub const DEPENDENCIES: &[&str] = &[
+    "libdrm", "gbm", "libinput", "libudev", "libseat", "libevdev",
+];
 
 pub fn install_workspace_shims(workspace_root: &Path) -> Result<PathBuf, String> {
     let sysroot = workspace_root.join(".macland").join("sysroot");
@@ -585,7 +1460,9 @@ fn install_stub_libraries(sysroot: &Path) -> Result<(), String> {
             .status()
             .map_err(|err| err.to_string())?;
         if !compile_status.success() {
-            return Err(format!("failed to compile stub library source for {library_name}"));
+            return Err(format!(
+                "failed to compile stub library source for {library_name}"
+            ));
         }
 
         let archive_status = Command::new("libtool")
@@ -620,13 +1497,19 @@ mod tests {
 
         let sysroot = install_workspace_shims(&temp).unwrap();
         for dependency in DEPENDENCIES {
-            assert!(sysroot
-                .join("lib/pkgconfig")
-                .join(format!("{dependency}.pc"))
-                .exists());
+            assert!(
+                sysroot
+                    .join("lib/pkgconfig")
+                    .join(format!("{dependency}.pc"))
+                    .exists()
+            );
         }
         assert!(sysroot.join("include/drm_fourcc.h").exists());
+        assert!(sysroot.join("include/gbm.h").exists());
+        assert!(sysroot.join("include/libinput.h").exists());
         assert!(sysroot.join("include/libseat.h").exists());
+        assert!(sysroot.join("include/libevdev/libevdev.h").exists());
+        assert!(sysroot.join("include/linux/input-event-codes.h").exists());
         assert!(sysroot.join("lib/librt.a").exists());
         assert!(sysroot.join("lib/libseat.a").exists());
 

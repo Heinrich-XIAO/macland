@@ -84,7 +84,11 @@ pub fn execute_command_line(
     if status.success() {
         Ok(())
     } else {
-        Err(format!("command `{}` failed with status {}", command.join(" "), status))
+        Err(format!(
+            "command `{}` failed with status {}",
+            command.join(" "),
+            status
+        ))
     }
 }
 
@@ -99,8 +103,23 @@ fn effective_env(env_pairs: &BTreeMap<String, String>) -> BTreeMap<String, Strin
     if let Some(path) = merged_include_path(env_pairs.get("CPATH")) {
         merged.insert("CPATH".to_string(), path);
     }
+    if let Some(flags) = merged_preprocessor_flags(env_pairs.get("CPPFLAGS")) {
+        merged.insert("CPPFLAGS".to_string(), flags);
+    }
+    if let Some(flags) = merged_compile_flags(env_pairs.get("CFLAGS")) {
+        merged.insert("CFLAGS".to_string(), flags.clone());
+        merged.insert(
+            "CXXFLAGS".to_string(),
+            merged_compile_flags(env_pairs.get("CXXFLAGS")).unwrap_or(flags),
+        );
+    } else if let Some(flags) = merged_compile_flags(env_pairs.get("CXXFLAGS")) {
+        merged.insert("CXXFLAGS".to_string(), flags);
+    }
     if let Some(path) = merged_library_path(env_pairs.get("LIBRARY_PATH")) {
         merged.insert("LIBRARY_PATH".to_string(), path);
+    }
+    if let Some(flags) = merged_linker_flags(env_pairs.get("LDFLAGS")) {
+        merged.insert("LDFLAGS".to_string(), flags);
     }
     if let Some(path) = merged_library_path(env_pairs.get("DYLD_FALLBACK_LIBRARY_PATH")) {
         merged.insert("DYLD_FALLBACK_LIBRARY_PATH".to_string(), path);
@@ -116,17 +135,17 @@ fn merged_pkg_config_path(override_value: Option<&String>) -> Option<String> {
         env::var_os("PKG_CONFIG_PATH"),
         override_value,
         &[
-        ".macland/sysroot/lib/pkgconfig",
-        ".macland/sysroot/share/pkgconfig",
-        "/opt/homebrew/lib/pkgconfig",
-        "/opt/homebrew/share/pkgconfig",
-        "/opt/homebrew/opt/epoll-shim/lib/pkgconfig",
-        "/opt/homebrew/opt/jpeg/lib/pkgconfig",
-        "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
-        "/opt/homebrew/opt/mesa/lib/pkgconfig",
-        "/usr/local/lib/pkgconfig",
-        "/usr/local/share/pkgconfig",
-    ],
+            ".macland/sysroot/lib/pkgconfig",
+            ".macland/sysroot/share/pkgconfig",
+            "/opt/homebrew/lib/pkgconfig",
+            "/opt/homebrew/share/pkgconfig",
+            "/opt/homebrew/opt/epoll-shim/lib/pkgconfig",
+            "/opt/homebrew/opt/jpeg/lib/pkgconfig",
+            "/opt/homebrew/opt/libxkbcommon/lib/pkgconfig",
+            "/opt/homebrew/opt/mesa/lib/pkgconfig",
+            "/usr/local/lib/pkgconfig",
+            "/usr/local/share/pkgconfig",
+        ],
     )
 }
 
@@ -182,6 +201,54 @@ fn merged_library_path(override_value: Option<&String>) -> Option<String> {
     )
 }
 
+fn merged_preprocessor_flags(override_value: Option<&String>) -> Option<String> {
+    merge_flag_list(
+        env::var_os("CPPFLAGS"),
+        override_value,
+        &[
+            "-I.macland/sysroot/include",
+            "-I/opt/homebrew/include",
+            "-I/opt/homebrew/opt/epoll-shim/include",
+            "-I/opt/homebrew/opt/jpeg/include",
+            "-I/opt/homebrew/opt/libxkbcommon/include",
+            "-I/opt/homebrew/opt/mesa/include",
+            "-I/usr/local/include",
+        ],
+    )
+}
+
+fn merged_compile_flags(override_value: Option<&String>) -> Option<String> {
+    merge_flag_list(
+        None,
+        override_value,
+        &[
+            "-I.macland/sysroot/include",
+            "-I/opt/homebrew/include",
+            "-I/opt/homebrew/opt/epoll-shim/include",
+            "-I/opt/homebrew/opt/jpeg/include",
+            "-I/opt/homebrew/opt/libxkbcommon/include",
+            "-I/opt/homebrew/opt/mesa/include",
+            "-I/usr/local/include",
+        ],
+    )
+}
+
+fn merged_linker_flags(override_value: Option<&String>) -> Option<String> {
+    merge_flag_list(
+        env::var_os("LDFLAGS"),
+        override_value,
+        &[
+            "-L.macland/sysroot/lib",
+            "-L/opt/homebrew/lib",
+            "-L/opt/homebrew/opt/epoll-shim/lib",
+            "-L/opt/homebrew/opt/jpeg/lib",
+            "-L/opt/homebrew/opt/libxkbcommon/lib",
+            "-L/opt/homebrew/opt/mesa/lib",
+            "-L/usr/local/lib",
+        ],
+    )
+}
+
 fn merged_path_env(override_value: Option<&String>) -> Option<String> {
     merge_path_list(
         env::var_os("PATH"),
@@ -192,6 +259,40 @@ fn merged_path_env(override_value: Option<&String>) -> Option<String> {
             "/usr/local/bin",
         ],
     )
+}
+
+fn merge_flag_list(
+    inherited_value: Option<std::ffi::OsString>,
+    override_value: Option<&String>,
+    candidates: &[&str],
+) -> Option<String> {
+    let mut flags = Vec::new();
+
+    if let Some(value) = inherited_value {
+        flags.extend(
+            value
+                .to_string_lossy()
+                .split_whitespace()
+                .map(ToString::to_string),
+        );
+    }
+    if let Some(value) = override_value {
+        flags.extend(value.split_whitespace().map(ToString::to_string));
+    }
+
+    for candidate in candidates {
+        if let Some(resolved) = resolve_candidate_flag(candidate) {
+            if !flags.iter().any(|flag| flag == &resolved) {
+                flags.push(resolved);
+            }
+        }
+    }
+
+    if flags.is_empty() {
+        None
+    } else {
+        Some(flags.join(" "))
+    }
 }
 
 fn merge_path_list(
@@ -223,13 +324,22 @@ fn merge_path_list(
     }
 }
 
+fn resolve_candidate_flag(candidate: &str) -> Option<String> {
+    let (prefix, path) = candidate.split_at(2);
+    let resolved = resolve_candidate_path(path)?;
+    Some(format!("{prefix}{resolved}"))
+}
+
 fn resolve_candidate_path(candidate: &str) -> Option<String> {
     let path = Path::new(candidate);
     if path.is_absolute() {
         return path.exists().then(|| path.display().to_string());
     }
 
-    find_workspace_root().map(|root| root.join(path)).filter(|path| path.exists()).map(|path| path.display().to_string())
+    find_workspace_root()
+        .map(|root| root.join(path))
+        .filter(|path| path.exists())
+        .map(|path| path.display().to_string())
 }
 
 fn find_workspace_root() -> Option<PathBuf> {

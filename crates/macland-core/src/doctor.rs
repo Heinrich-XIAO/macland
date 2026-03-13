@@ -34,7 +34,15 @@ pub struct HostStatus {
 
 impl DoctorReport {
     pub fn gather() -> Self {
-        let tool_names = ["swift", "cargo", "rustc", "clang", "meson", "ninja", "pkg-config"];
+        let tool_names = [
+            "swift",
+            "cargo",
+            "rustc",
+            "clang",
+            "meson",
+            "ninja",
+            "pkg-config",
+        ];
         let tools = tool_names
             .into_iter()
             .map(|name| match locate_tool(name) {
@@ -70,6 +78,7 @@ impl DoctorReport {
             "libdrm",
             "gbm",
             "libinput",
+            "libevdev",
             "libudev",
             "libseat",
         ];
@@ -121,7 +130,9 @@ fn probe_pkg_config(name: &'static str) -> NativeDependencyStatus {
     }
 
     let detail = match command.output() {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             if stderr.is_empty() {
@@ -199,10 +210,12 @@ mod tests {
     fn gathers_report() {
         let report = DoctorReport::gather();
         assert!(report.tools.iter().any(|tool| tool.name == "swift"));
-        assert!(report
-            .native_dependencies
-            .iter()
-            .any(|dependency| dependency.name == "pixman-1"));
+        assert!(
+            report
+                .native_dependencies
+                .iter()
+                .any(|dependency| dependency.name == "pixman-1")
+        );
         assert!(report.backend.supports_fullscreen_host);
     }
 }
