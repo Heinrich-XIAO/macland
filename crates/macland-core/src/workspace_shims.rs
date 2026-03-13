@@ -603,6 +603,38 @@ typedef struct _drmModeFB2 {
     uint32_t offsets[4];
 } drmModeFB2;
 
+typedef enum drmModeConnection {
+    DRM_MODE_CONNECTED = 1,
+    DRM_MODE_DISCONNECTED = 2,
+    DRM_MODE_UNKNOWNCONNECTION = 3,
+} drmModeConnection;
+
+typedef struct _drmModePlane {
+    uint32_t plane_id;
+    uint32_t crtc_id;
+    uint32_t fb_id;
+    uint32_t possible_crtcs;
+    uint32_t gamma_size;
+    uint32_t count_formats;
+    uint32_t* formats;
+} drmModePlane;
+
+typedef struct _drmModeConnector {
+    uint32_t connector_id;
+    uint32_t encoder_id;
+    drmModeConnection connection;
+    uint32_t mmWidth;
+    uint32_t mmHeight;
+    uint32_t subpixel;
+    int count_modes;
+    drmModeModeInfo* modes;
+    int count_props;
+    uint32_t* props;
+    uint64_t* prop_values;
+    int count_encoders;
+    uint32_t* encoders;
+} drmModeConnector;
+
 typedef struct _drmModeRes {
     int count_fbs;
     int count_crtcs;
@@ -706,6 +738,44 @@ static inline drmModeFB2* drmModeGetFB2(int fd, uint32_t fb_id) {
 
 static inline void drmModeFreeFB2(drmModeFB2* fb) {
     free(fb);
+}
+
+static inline drmModePlane* drmModeGetPlane(int fd, uint32_t plane_id) {
+    drmModePlane* plane = (drmModePlane*)calloc(1, sizeof(drmModePlane));
+    (void)fd;
+    if (plane) {
+        plane->plane_id = plane_id;
+    }
+    return plane;
+}
+
+static inline void drmModeFreePlane(drmModePlane* plane) {
+    if (!plane) {
+        return;
+    }
+    free(plane->formats);
+    free(plane);
+}
+
+static inline drmModeConnector* drmModeGetConnector(int fd, uint32_t connector_id) {
+    drmModeConnector* connector = (drmModeConnector*)calloc(1, sizeof(drmModeConnector));
+    (void)fd;
+    if (connector) {
+        connector->connector_id = connector_id;
+        connector->connection = DRM_MODE_DISCONNECTED;
+    }
+    return connector;
+}
+
+static inline void drmModeFreeConnector(drmModeConnector* connector) {
+    if (!connector) {
+        return;
+    }
+    free(connector->modes);
+    free(connector->props);
+    free(connector->prop_values);
+    free(connector->encoders);
+    free(connector);
 }
 
 #ifndef MACLAND_DRM_CLOSE_BUFFER_HANDLE_DEFINED
@@ -2163,6 +2233,12 @@ mod tests {
         assert!(xf86drm.contains("drmGetVersion"));
         assert!(xf86drm.contains("drmFreeVersion"));
         assert!(xf86drm.contains("drmDevicesEqual"));
+        let xf86drmmode = fs::read_to_string(sysroot.join("include/xf86drmMode.h")).unwrap();
+        assert!(xf86drmmode.contains("typedef enum drmModeConnection"));
+        assert!(xf86drmmode.contains("typedef struct _drmModePlane"));
+        assert!(xf86drmmode.contains("typedef struct _drmModeConnector"));
+        assert!(xf86drmmode.contains("drmModeGetPlane"));
+        assert!(xf86drmmode.contains("drmModeGetConnector"));
         let input_codes =
             fs::read_to_string(sysroot.join("include/linux/input-event-codes.h")).unwrap();
         assert!(input_codes.contains("#define EV_KEY 0x01"));
