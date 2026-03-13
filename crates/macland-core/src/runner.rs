@@ -268,6 +268,14 @@ fn merge_flag_list(
 ) -> Option<String> {
     let mut flags = Vec::new();
 
+    for candidate in candidates {
+        if let Some(resolved) = resolve_candidate_flag(candidate) {
+            if !flags.iter().any(|flag| flag == &resolved) {
+                flags.push(resolved);
+            }
+        }
+    }
+
     if let Some(value) = inherited_value {
         flags.extend(
             value
@@ -278,14 +286,6 @@ fn merge_flag_list(
     }
     if let Some(value) = override_value {
         flags.extend(value.split_whitespace().map(ToString::to_string));
-    }
-
-    for candidate in candidates {
-        if let Some(resolved) = resolve_candidate_flag(candidate) {
-            if !flags.iter().any(|flag| flag == &resolved) {
-                flags.push(resolved);
-            }
-        }
     }
 
     if flags.is_empty() {
@@ -302,19 +302,19 @@ fn merge_path_list(
 ) -> Option<String> {
     let mut paths = Vec::new();
 
-    if let Some(value) = inherited_value {
-        paths.extend(env::split_paths(&value).map(|path| path.display().to_string()));
-    }
-    if let Some(value) = override_value {
-        paths.extend(env::split_paths(value).map(|path| path.display().to_string()));
-    }
-
     for candidate in candidates {
         if let Some(resolved) = resolve_candidate_path(candidate) {
             if !paths.iter().any(|path| path == &resolved) {
                 paths.push(resolved);
             }
         }
+    }
+
+    if let Some(value) = inherited_value {
+        paths.extend(env::split_paths(&value).map(|path| path.display().to_string()));
+    }
+    if let Some(value) = override_value {
+        paths.extend(env::split_paths(value).map(|path| path.display().to_string()));
     }
 
     if paths.is_empty() {

@@ -62,6 +62,36 @@ const FILES: &[(&str, &str)] = &[
 #define DRM_FORMAT_ABGR16161616 fourcc_code('A', 'B', '4', '8')
 #define DRM_FORMAT_YVYU fourcc_code('Y', 'V', 'Y', 'U')
 #define DRM_FORMAT_VYUY fourcc_code('V', 'Y', 'U', 'Y')
+#define DRM_FORMAT_NV12 fourcc_code('N', 'V', '1', '2')
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#define DRM_FORMAT_NV16 fourcc_code('N', 'V', '1', '6')
+#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+#define DRM_FORMAT_NV21 fourcc_code('N', 'V', '2', '1')
+#define DRM_FORMAT_NV24 fourcc_code('N', 'V', '2', '4')
+#define DRM_FORMAT_NV30 fourcc_code('N', 'V', '3', '0')
+#define DRM_FORMAT_NV42 fourcc_code('N', 'V', '4', '2')
+#define DRM_FORMAT_NV61 fourcc_code('N', 'V', '6', '1')
+#define DRM_FORMAT_P010 fourcc_code('P', '0', '1', '0')
+#define DRM_FORMAT_P012 fourcc_code('P', '0', '1', '2')
+#define DRM_FORMAT_P016 fourcc_code('P', '0', '1', '6')
+#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
+#define DRM_FORMAT_P210 fourcc_code('P', '2', '1', '0')
+#define DRM_FORMAT_Q401 fourcc_code('Q', '4', '0', '1')
+#define DRM_FORMAT_Q410 fourcc_code('Q', '4', '1', '0')
+#define DRM_FORMAT_S010 fourcc_code('S', '0', '1', '0')
+#define DRM_FORMAT_S012 fourcc_code('S', '0', '1', '2')
+#define DRM_FORMAT_S016 fourcc_code('S', '0', '1', '6')
+#define DRM_FORMAT_S210 fourcc_code('S', '2', '1', '0')
+#define DRM_FORMAT_S212 fourcc_code('S', '2', '1', '2')
+#define DRM_FORMAT_R16F fourcc_code('R', '1', '6', 'H')
+#define DRM_FORMAT_R32F fourcc_code('R', '3', '2', 'F')
+#define DRM_FORMAT_GR1616F fourcc_code('G', 'R', '2', 'H')
+#define DRM_FORMAT_GR3232F fourcc_code('G', 'R', '2', 'F')
+#define DRM_FORMAT_BGR161616 fourcc_code('B', 'G', '4', '8')
+#define DRM_FORMAT_BGR161616F fourcc_code('B', 'G', '4', 'H')
+#define DRM_FORMAT_BGR323232F fourcc_code('B', 'G', '3', 'F')
+#define DRM_FORMAT_ABGR32323232F fourcc_code('A', 'B', '4', 'F')
+#define DRM_FORMAT_AYUV fourcc_code('A', 'Y', 'U', 'V')
 
 #define DRM_FORMAT_MOD_LINEAR 0ULL
 #define DRM_FORMAT_MOD_INVALID ((1ULL << 56) - 1ULL)
@@ -74,11 +104,37 @@ const FILES: &[(&str, &str)] = &[
         r#"#ifndef XF86DRM_H
 #define XF86DRM_H
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
 
 typedef uint32_t drm_magic_t;
+
+#define DRM_NODE_PRIMARY 0
+#define DRM_NODE_CONTROL 1
+#define DRM_NODE_RENDER 2
+#define DRM_NODE_MAX 3
+#define DRM_CAP_SYNCOBJ_TIMELINE 0x13
+#define DRM_CAP_DUMB_BUFFER 0x1
+#define DRM_CLOEXEC 0x1
+#define DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE (1U << 0)
+#define DRM_IOCTL_SYNCOBJ_EVENTFD 0x00
+
+typedef struct _drmDevice {
+    int available_nodes;
+    char* nodes[4];
+} drmDevice, *drmDevicePtr;
+
+struct drm_syncobj_eventfd {
+    uint32_t handle;
+    uint32_t flags;
+    uint64_t point;
+    int fd;
+    uint32_t pad;
+};
 
 static inline char* drmGetFormatName(uint32_t format) {
     char* out = (char*)malloc(11);
@@ -97,6 +153,283 @@ static inline char* drmGetFormatModifierName(uint64_t modifier) {
     snprintf(out, 19, "0x%016llx", (unsigned long long)modifier);
     return out;
 }
+
+static inline int drmGetDevices2(uint32_t flags, drmDevicePtr devices[], int max_devices) {
+    (void)flags;
+    (void)devices;
+    (void)max_devices;
+    errno = ENODEV;
+    return -ENODEV;
+}
+
+static inline int drmGetDevice(int fd, drmDevicePtr* device) {
+    (void)fd;
+    if (device) {
+        *device = NULL;
+    }
+    errno = ENODEV;
+    return -1;
+}
+
+static inline int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags, drmDevicePtr* device) {
+    (void)dev_id;
+    (void)flags;
+    if (device) {
+        *device = NULL;
+    }
+    errno = ENODEV;
+    return -1;
+}
+
+static inline void drmFreeDevice(drmDevicePtr* device) {
+    if (!device || !*device) {
+        return;
+    }
+    for (size_t index = 0; index < 4; ++index) {
+        free((*device)->nodes[index]);
+    }
+    free(*device);
+    *device = NULL;
+}
+
+static inline int drmGetNodeTypeFromFd(int fd) {
+    (void)fd;
+    return DRM_NODE_RENDER;
+}
+
+static inline char* drmGetRenderDeviceNameFromFd(int fd) {
+    (void)fd;
+    return NULL;
+}
+
+static inline char* drmGetPrimaryDeviceNameFromFd(int fd) {
+    (void)fd;
+    return NULL;
+}
+
+static inline char* drmGetDeviceNameFromFd2(int fd) {
+    (void)fd;
+    return NULL;
+}
+
+static inline int drmGetCap(int fd, uint64_t capability, uint64_t* value) {
+    (void)fd;
+    (void)capability;
+    if (value) {
+        *value = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmIsMaster(int fd) {
+    (void)fd;
+    return 0;
+}
+
+static inline int drmGetMagic(int fd, drm_magic_t* magic) {
+    (void)fd;
+    if (magic) {
+        *magic = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmAuthMagic(int fd, drm_magic_t magic) {
+    (void)fd;
+    (void)magic;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags, int* prime_fd) {
+    (void)fd;
+    (void)handle;
+    (void)flags;
+    if (prime_fd) {
+        *prime_fd = -1;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmIoctl(int fd, unsigned long request, void* arg) {
+    (void)fd;
+    (void)request;
+    (void)arg;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjCreate(int fd, uint32_t flags, uint32_t* handle) {
+    (void)fd;
+    (void)flags;
+    if (handle) {
+        *handle = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjDestroy(int fd, uint32_t handle) {
+    (void)fd;
+    (void)handle;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjFDToHandle(int fd, int syncobj_fd, uint32_t* handle) {
+    (void)fd;
+    (void)syncobj_fd;
+    if (handle) {
+        *handle = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjHandleToFD(int fd, uint32_t handle, int* obj_fd) {
+    (void)fd;
+    (void)handle;
+    if (obj_fd) {
+        *obj_fd = -1;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjTransfer(int fd, uint32_t dst_handle, uint64_t dst_point,
+        uint32_t src_handle, uint64_t src_point, uint32_t flags) {
+    (void)fd;
+    (void)dst_handle;
+    (void)dst_point;
+    (void)src_handle;
+    (void)src_point;
+    (void)flags;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjExportSyncFile(int fd, uint32_t handle, int* sync_file_fd) {
+    (void)fd;
+    (void)handle;
+    if (sync_file_fd) {
+        *sync_file_fd = -1;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd) {
+    (void)fd;
+    (void)handle;
+    (void)sync_file_fd;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjTimelineWait(int fd, const uint32_t* handles, const uint64_t* points,
+        unsigned int handle_count, int64_t timeout_nsec, unsigned flags, void* first_signaled) {
+    (void)fd;
+    (void)handles;
+    (void)points;
+    (void)handle_count;
+    (void)timeout_nsec;
+    (void)flags;
+    (void)first_signaled;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjTimelineSignal(int fd, const uint32_t* handles, const uint64_t* points,
+        unsigned int handle_count) {
+    (void)fd;
+    (void)handles;
+    (void)points;
+    (void)handle_count;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmSyncobjEventfd(int fd, uint32_t handle, uint64_t point, int event_fd, uint32_t flags) {
+    (void)fd;
+    (void)handle;
+    (void)point;
+    (void)event_fd;
+    (void)flags;
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmModeCreateLease(int fd, const uint32_t* objects, int num_objects, int flags, uint32_t* lessee_id) {
+    (void)fd;
+    (void)objects;
+    (void)num_objects;
+    (void)flags;
+    if (lessee_id) {
+        *lessee_id = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmModeCreateDumbBuffer(int fd, uint32_t width, uint32_t height, uint32_t bpp,
+        uint32_t flags, uint32_t* handle, uint32_t* pitch, uint64_t* size) {
+    (void)fd;
+    (void)width;
+    (void)height;
+    (void)bpp;
+    (void)flags;
+    if (handle) {
+        *handle = 0;
+    }
+    if (pitch) {
+        *pitch = 0;
+    }
+    if (size) {
+        *size = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmModeMapDumbBuffer(int fd, uint32_t handle, uint64_t* offset) {
+    (void)fd;
+    (void)handle;
+    if (offset) {
+        *offset = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+static inline int drmModeDestroyDumbBuffer(int fd, uint32_t handle) {
+    (void)fd;
+    (void)handle;
+    errno = ENOTSUP;
+    return -1;
+}
+
+#endif
+"#,
+    ),
+    (
+        "include/drm_mode.h",
+        r#"#ifndef DRM_MODE_H
+#define DRM_MODE_H
+
+#include <xf86drmMode.h>
+
+#endif
+"#,
+    ),
+    (
+        "include/malloc.h",
+        r#"#ifndef MALLOC_H
+#define MALLOC_H
+
+#include <stdlib.h>
 
 #endif
 "#,
@@ -408,6 +741,7 @@ static inline int gbm_bo_get_fd_for_plane(struct gbm_bo* bo, int plane) {
 #define LIBINPUT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
