@@ -21,6 +21,7 @@ impl BootstrapPlan {
                 "meson" => Some("meson"),
                 "ninja" => Some("ninja"),
                 "pkg-config" => Some("pkg-config"),
+                "Xwayland" => Some("xorg-server"),
                 _ => None,
             };
             if let Some(package) = package {

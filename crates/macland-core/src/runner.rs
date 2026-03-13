@@ -250,11 +250,7 @@ fn merged_linker_flags(override_value: Option<&String>) -> Option<String> {
         candidates.insert(0, "-lrt");
     }
 
-    merge_flag_list(
-        env::var_os("LDFLAGS"),
-        override_value,
-        &candidates,
-    )
+    merge_flag_list(env::var_os("LDFLAGS"), override_value, &candidates)
 }
 
 fn merged_path_env(override_value: Option<&String>) -> Option<String> {

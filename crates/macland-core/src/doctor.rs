@@ -42,6 +42,8 @@ impl DoctorReport {
             "meson",
             "ninja",
             "pkg-config",
+            "Xwayland",
+            "xwayland-satellite",
         ];
         let tools = tool_names
             .into_iter()

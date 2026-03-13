@@ -4,8 +4,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,6 +35,28 @@ pub struct HostLaunchRequest {
 pub struct HostLaunchArtifacts {
     pub request_path: PathBuf,
     pub status_path: PathBuf,
+    pub runtime_dir: PathBuf,
+}
+
+pub struct RunningHostSession {
+    child: Child,
+}
+
+impl RunningHostSession {
+    pub fn terminate(&mut self) -> Result<(), String> {
+        if self
+            .child
+            .try_wait()
+            .map_err(|err| err.to_string())?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        self.child.kill().map_err(|err| err.to_string())?;
+        self.child.wait().map_err(|err| err.to_string())?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,12 +78,27 @@ pub fn create_launch_request(
     fs::create_dir_all(artifacts_root).map_err(|err| err.to_string())?;
     let request_path = artifacts_root.join("host-launch.json");
     let status_path = artifacts_root.join("host-status.txt");
+    let runtime_dir = artifacts_root.join("runtime");
     let _ = fs::remove_file(&status_path);
+    let _ = fs::remove_dir_all(&runtime_dir);
+    fs::create_dir_all(&runtime_dir).map_err(|err| err.to_string())?;
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(&runtime_dir)
+            .map_err(|err| err.to_string())?
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&runtime_dir, permissions).map_err(|err| err.to_string())?;
+    }
+    let mut environment = effective_env(&manifest.env);
+    environment
+        .entry("XDG_RUNTIME_DIR".to_string())
+        .or_insert_with(|| runtime_dir.display().to_string());
     let request = HostLaunchRequest {
         mode,
         compositor_executable: Some(resolve_binary(source_root, binary).display().to_string()),
         compositor_arguments: args.to_vec(),
-        environment: effective_env(&manifest.env),
+        environment,
         permission_hints: vec!["accessibility".to_string(), "inputMonitoring".to_string()],
         working_directory: Some(source_root.display().to_string()),
         status_file: Some(status_path.display().to_string()),
@@ -70,6 +109,7 @@ pub fn create_launch_request(
     Ok(HostLaunchArtifacts {
         request_path,
         status_path,
+        runtime_dir,
     })
 }
 
@@ -105,6 +145,31 @@ pub fn smoke_launch_host(
     startup_timeout: Duration,
     startup_grace: Duration,
 ) -> Result<(), String> {
+    match spawn_host_until_started(host_binary, artifacts, startup_timeout, startup_grace) {
+        Ok(mut session) => session.terminate(),
+        Err(err) if err.contains("host exited before conformance could attach") => {
+            let status_value = read_host_status(&artifacts.status_path)?.ok_or_else(|| {
+                format!(
+                    "host exited without writing status file {}",
+                    artifacts.status_path.display()
+                )
+            })?;
+            if is_success_status(&status_value) {
+                Ok(())
+            } else {
+                Err(format!("host reported status {status_value}"))
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub fn spawn_host_until_started(
+    host_binary: &Path,
+    artifacts: &HostLaunchArtifacts,
+    startup_timeout: Duration,
+    startup_grace: Duration,
+) -> Result<RunningHostSession, String> {
     let mut child = Command::new(host_binary)
         .args([
             "--config",
@@ -125,9 +190,7 @@ pub fn smoke_launch_host(
                         return Err(format!("host reported status {updated_status}"));
                     }
                 }
-                let _ = child.kill();
-                let _ = child.wait();
-                return Ok(());
+                return Ok(RunningHostSession { child });
             }
 
             if is_failure_status(&status_value) {
@@ -145,7 +208,9 @@ pub fn smoke_launch_host(
                     )
                 })?;
                 if is_success_status(&status_value) {
-                    return Ok(());
+                    return Err(format!(
+                        "host exited before conformance could attach ({status_value})"
+                    ));
                 }
                 return Err(format!("host reported status {status_value}"));
             }
@@ -205,8 +270,8 @@ fn is_failure_status(status: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host,
-        smoke_launch_host,
+        HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host, smoke_launch_host,
+        spawn_host_until_started,
     };
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
@@ -243,6 +308,7 @@ mod tests {
         let contents = std::fs::read_to_string(artifacts.request_path).unwrap();
         assert!(contents.contains("\"windowedDebug\""));
         assert!(contents.contains("/tmp/demo/bin/demo"));
+        assert!(artifacts.runtime_dir.ends_with("runtime"));
     }
 
     #[test]
@@ -257,6 +323,7 @@ mod tests {
         let artifacts = HostLaunchArtifacts {
             request_path: temp.join("request.json"),
             status_path: temp.join("status.json"),
+            runtime_dir: temp.join("runtime"),
         };
         fs::write(&artifacts.request_path, "{}").unwrap();
         let err = launch_host(&host_binary, &artifacts).unwrap_err();
@@ -285,6 +352,7 @@ mod tests {
         let artifacts = HostLaunchArtifacts {
             request_path: temp.join("request.json"),
             status_path: status_path.clone(),
+            runtime_dir: temp.join("runtime"),
         };
         fs::write(&artifacts.request_path, "{}").unwrap();
         let err = launch_host(&host_binary, &artifacts).unwrap_err();
@@ -313,6 +381,7 @@ mod tests {
         let artifacts = HostLaunchArtifacts {
             request_path: temp.join("request.json"),
             status_path: status_path.clone(),
+            runtime_dir: temp.join("runtime"),
         };
         fs::write(&artifacts.request_path, "{}").unwrap();
 
@@ -323,6 +392,42 @@ mod tests {
             Duration::from_millis(100),
         )
         .unwrap();
+
+        fs::remove_dir_all(&temp).unwrap();
+    }
+
+    #[test]
+    fn spawn_host_until_started_returns_running_child() {
+        let temp = std::env::temp_dir()
+            .join(format!("macland-host-launch-running-{}", std::process::id()));
+        if temp.exists() {
+            fs::remove_dir_all(&temp).unwrap();
+        }
+        fs::create_dir_all(&temp).unwrap();
+
+        let status_path = temp.join("status.json");
+        let host_binary = write_script(
+            &temp.join("host-running.sh"),
+            &format!(
+                "#!/bin/sh\ncat <<'EOF' > \"{}\"\n{{\"status\":\"child_started\"}}\nEOF\nsleep 30\n",
+                status_path.display()
+            ),
+        );
+        let artifacts = HostLaunchArtifacts {
+            request_path: temp.join("request.json"),
+            status_path: status_path.clone(),
+            runtime_dir: temp.join("runtime"),
+        };
+        fs::write(&artifacts.request_path, "{}").unwrap();
+
+        let mut session = spawn_host_until_started(
+            &host_binary,
+            &artifacts,
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        session.terminate().unwrap();
 
         fs::remove_dir_all(&temp).unwrap();
     }

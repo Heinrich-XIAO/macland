@@ -1,0 +1,497 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 87574b82..f1f07484 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -95,7 +95,7 @@ endif()
+ 
+ add_compile_definitions(HYPRLAND_VERSION="${HYPRLAND_VERSION}")
+ 
+-include_directories(. "src/" "protocols/")
++include_directories("src/" "protocols/")
+ 
+ set(CMAKE_CXX_STANDARD 26)
+ set(CXX_STANDARD_REQUIRED ON)
+@@ -407,7 +407,7 @@ if(CMAKE_DISABLE_PRECOMPILE_HEADERS)
+ else()
+   message(STATUS "Setting precompiled headers")
+   target_precompile_headers(hyprland_lib PRIVATE
+-                            $<$<COMPILE_LANGUAGE:CXX>:src/pch/pch.hpp>)
++                            $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/pch/pch.hpp>)
+ endif()
+ 
+ message(STATUS "Setting link libraries")
+diff --git a/hyprctl/src/main.cpp b/hyprctl/src/main.cpp
+index 0a33f3ed..11ff13dd 100644
+--- a/hyprctl/src/main.cpp
++++ b/hyprctl/src/main.cpp
+@@ -271,7 +271,7 @@ int requestIPC(std::string_view filename, std::string_view arg) {
+     sockaddr_un serverAddress = {0};
+     serverAddress.sun_family  = AF_UNIX;
+ 
+-    std::string socketPath = getRuntimeDir() + "/" + instanceSignature + "/" + filename;
++    std::string socketPath = getRuntimeDir() + "/" + instanceSignature + "/" + std::string(filename);
+ 
+     strncpy(serverAddress.sun_path, socketPath.c_str(), sizeof(serverAddress.sun_path) - 1);
+ 
+diff --git a/scripts/generateShaderIncludes.sh b/scripts/generateShaderIncludes.sh
+index c9419031..27a9d566 100755
+--- a/scripts/generateShaderIncludes.sh
++++ b/scripts/generateShaderIncludes.sh
+@@ -15,7 +15,11 @@ echo 'static const std::map<std::string, std::string> SHADERS = {' >> ./src/rend
+ for filename in `ls ${SHADERS_SRC}`; do
+ 	echo "--	${filename}"
+ 	
+-	{ echo -n 'R"#('; cat ${SHADERS_SRC}/${filename}; echo ')#"'; } > ./src/render/shaders/${filename}.inc
++	{
++		printf 'R"#('
++		cat ${SHADERS_SRC}/${filename}
++		printf ')#"'
++	} > ./src/render/shaders/${filename}.inc
+ 	echo "{\"${filename}\"," >> ./src/render/shaders/Shaders.hpp
+ 	echo "#include \"./${filename}.inc\"" >> ./src/render/shaders/Shaders.hpp
+ 	echo "}," >> ./src/render/shaders/Shaders.hpp
+diff --git a/src/debug/HyprCtl.cpp b/src/debug/HyprCtl.cpp
+index 31c22ac9..2c08183f 100644
+--- a/src/debug/HyprCtl.cpp
++++ b/src/debug/HyprCtl.cpp
+@@ -19,6 +19,7 @@
+ #include <filesystem>
+ #include <ranges>
+ #include <sys/eventfd.h>
++#include <fcntl.h>
+ 
+ #include <sstream>
+ #include <string>
+@@ -2297,11 +2298,24 @@ static int hyprCtlFDTick(int fd, uint32_t mask, void* data) {
+     sockaddr_in            clientAddress;
+     socklen_t              clientSize = sizeof(clientAddress);
+ 
+-    const auto             ACCEPTEDCONNECTION = accept4(g_pHyprCtl->m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize, SOCK_CLOEXEC);
++    int                    ACCEPTEDCONNECTION = -1;
++#ifdef __APPLE__
++    ACCEPTEDCONNECTION = accept(g_pHyprCtl->m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize);
++    if (ACCEPTEDCONNECTION >= 0) {
++        const int flags = fcntl(ACCEPTEDCONNECTION, F_GETFD, 0);
++        if (flags >= 0)
++            fcntl(ACCEPTEDCONNECTION, F_SETFD, flags | FD_CLOEXEC);
++    }
++#else
++    ACCEPTEDCONNECTION = accept4(g_pHyprCtl->m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize, SOCK_CLOEXEC);
++#endif
+ 
+     std::array<char, 1024> readBuffer;
+ 
+     // try to get creds
++#ifdef __APPLE__
++    g_pHyprCtl->m_currentRequestParams.pid = 0;
++#else
+     CRED_T   creds;
+     uint32_t len = sizeof(creds);
+     if (getsockopt(ACCEPTEDCONNECTION, CRED_LVL, CRED_OPT, &creds, &len) == -1)
+@@ -2310,6 +2324,7 @@ static int hyprCtlFDTick(int fd, uint32_t mask, void* data) {
+         g_pHyprCtl->m_currentRequestParams.pid = creds.CRED_PID;
+         Log::logger->log(Log::DEBUG, "Hyprctl: new connection from pid {}", creds.CRED_PID);
+     }
++#endif
+ 
+     //
+     pollfd pollfds[1] = {
+@@ -2380,13 +2395,23 @@ static int hyprCtlFDTick(int fd, uint32_t mask, void* data) {
+ }
+ 
+ void CHyprCtl::startHyprCtlSocket() {
++#ifdef __APPLE__
++    m_socketFD = CFileDescriptor{socket(AF_UNIX, SOCK_STREAM, 0)};
++#else
+     m_socketFD = CFileDescriptor{socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)};
++#endif
+ 
+     if (!m_socketFD.isValid()) {
+         Log::logger->log(Log::ERR, "Couldn't start the Hyprland Socket. (1) IPC will not work.");
+         return;
+     }
+ 
++#ifdef __APPLE__
++    const int flags = fcntl(m_socketFD.get(), F_GETFD, 0);
++    if (flags >= 0)
++        fcntl(m_socketFD.get(), F_SETFD, flags | FD_CLOEXEC);
++#endif
++
+     sockaddr_un SERVERADDRESS = {.sun_family = AF_UNIX};
+ 
+     m_socketPath = g_pCompositor->m_instancePath + "/.socket.sock";
+diff --git a/src/debug/crash/CrashReporter.cpp b/src/debug/crash/CrashReporter.cpp
+index fad6ad21..266437ef 100644
+--- a/src/debug/crash/CrashReporter.cpp
++++ b/src/debug/crash/CrashReporter.cpp
+@@ -1,7 +1,12 @@
+ #include "CrashReporter.hpp"
+ #include <fcntl.h>
+ #include <sys/utsname.h>
++#if defined(__GLIBC__)
+ #include <link.h>
++#endif
++#if defined(__APPLE__)
++#include <mach-o/dyld.h>
++#endif
+ #include <ctime>
+ #include <cerrno>
+ #include <sys/stat.h>
+@@ -205,6 +210,15 @@ void CrashReporter::createAndSaveCrash(int sig) {
+ #elif defined(__OpenBSD__)
+     // Neither KERN_PROC_PATHNAME nor /proc are supported
+     const auto FPATH = std::filesystem::canonical("/usr/local/bin/Hyprland");
++#elif defined(__APPLE__)
++    uint32_t exePathSize = 0;
++    _NSGetExecutablePath(nullptr, &exePathSize);
++    std::string executablePath(exePathSize, '\0');
++    _NSGetExecutablePath(executablePath.data(), &exePathSize);
++    std::error_code executablePathError;
++    auto FPATH = std::filesystem::weakly_canonical(std::filesystem::path(executablePath.c_str()), executablePathError);
++    if (executablePathError)
++        FPATH = std::filesystem::path(executablePath.c_str());
+ #else
+     const auto FPATH = std::filesystem::canonical("/proc/self/exe");
+ #endif
+diff --git a/src/helpers/SdDaemon.cpp b/src/helpers/SdDaemon.cpp
+index b6c207d8..78357dc5 100644
+--- a/src/helpers/SdDaemon.cpp
++++ b/src/helpers/SdDaemon.cpp
+@@ -21,7 +21,17 @@ int NSystemd::sdBooted() {
+ }
+ 
+ int NSystemd::sdNotify(int unsetEnvironment, const char* state) {
+-    int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
++    int fd = -1;
++#ifdef __APPLE__
++    fd = socket(AF_UNIX, SOCK_DGRAM, 0);
++    if (fd >= 0) {
++        int currentFlags = fcntl(fd, F_GETFD);
++        if (currentFlags >= 0)
++            fcntl(fd, F_SETFD, currentFlags | FD_CLOEXEC);
++    }
++#else
++    fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
++#endif
+     if (fd < 0)
+         return -errno;
+ 
+diff --git a/src/helpers/sync/SyncReleaser.cpp b/src/helpers/sync/SyncReleaser.cpp
+index fbc585d0..ba7ceaa6 100644
+--- a/src/helpers/sync/SyncReleaser.cpp
++++ b/src/helpers/sync/SyncReleaser.cpp
+@@ -1,6 +1,7 @@
+ #include "SyncReleaser.hpp"
+ #include "SyncTimeline.hpp"
+ #include "../../render/OpenGL.hpp"
++#include <cstdint>
+ #include <sys/ioctl.h>
+ 
+ #if defined(__linux__)
+@@ -8,10 +9,10 @@
+ #else
+ struct sync_merge_data {
+     char  name[32];
+-    __s32 fd2;
+-    __s32 fence;
+-    __u32 flags;
+-    __u32 pad;
++    int32_t  fd2;
++    int32_t  fence;
++    uint32_t flags;
++    uint32_t pad;
+ };
+ #define SYNC_IOC_MAGIC '>'
+ #define SYNC_IOC_MERGE _IOWR(SYNC_IOC_MAGIC, 3, struct sync_merge_data)
+diff --git a/src/managers/EventManager.cpp b/src/managers/EventManager.cpp
+index 6d42a818..1398eb56 100644
+--- a/src/managers/EventManager.cpp
++++ b/src/managers/EventManager.cpp
+@@ -9,14 +9,29 @@
+ #include <sys/un.h>
+ #include <unistd.h>
+ #include <cstring>
++#include <fcntl.h>
+ using namespace Hyprutils::OS;
+ 
+-CEventManager::CEventManager() : m_socketFD(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)) {
++CEventManager::CEventManager()
++#ifdef __APPLE__
++    : m_socketFD(socket(AF_UNIX, SOCK_STREAM, 0)) {
++#else
++    : m_socketFD(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)) {
++#endif
+     if (!m_socketFD.isValid()) {
+         Log::logger->log(Log::ERR, "Couldn't start the Hyprland Socket 2. (1) IPC will not work.");
+         return;
+     }
+ 
++#ifdef __APPLE__
++    const int flags = fcntl(m_socketFD.get(), F_GETFD, 0);
++    if (flags >= 0)
++        fcntl(m_socketFD.get(), F_SETFD, flags | FD_CLOEXEC);
++    const int statusFlags = fcntl(m_socketFD.get(), F_GETFL, 0);
++    if (statusFlags >= 0)
++        fcntl(m_socketFD.get(), F_SETFL, statusFlags | O_NONBLOCK);
++#endif
++
+     sockaddr_un SERVERADDRESS = {.sun_family = AF_UNIX};
+     const auto  PATH          = g_pCompositor->m_instancePath + "/.socket2.sock";
+     if (PATH.length() > sizeof(SERVERADDRESS.sun_path) - 1) {
+@@ -70,7 +85,21 @@ int CEventManager::onServerEvent(int fd, uint32_t mask) {
+ 
+     sockaddr_in     clientAddress;
+     socklen_t       clientSize = sizeof(clientAddress);
+-    CFileDescriptor ACCEPTEDCONNECTION{accept4(m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize, SOCK_CLOEXEC | SOCK_NONBLOCK)};
++    CFileDescriptor ACCEPTEDCONNECTION;
++#ifdef __APPLE__
++    const int acceptedConnection = accept(m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize);
++    if (acceptedConnection >= 0) {
++        const int fdFlags = fcntl(acceptedConnection, F_GETFD, 0);
++        if (fdFlags >= 0)
++            fcntl(acceptedConnection, F_SETFD, fdFlags | FD_CLOEXEC);
++        const int statusFlags = fcntl(acceptedConnection, F_GETFL, 0);
++        if (statusFlags >= 0)
++            fcntl(acceptedConnection, F_SETFL, statusFlags | O_NONBLOCK);
++    }
++    ACCEPTEDCONNECTION = CFileDescriptor{acceptedConnection};
++#else
++    ACCEPTEDCONNECTION = CFileDescriptor{accept4(m_socketFD.get(), rc<sockaddr*>(&clientAddress), &clientSize, SOCK_CLOEXEC | SOCK_NONBLOCK)};
++#endif
+     if (!ACCEPTEDCONNECTION.isValid()) {
+         if (errno != EAGAIN) {
+             Log::logger->log(Log::ERR, "Socket2 failed receiving connection, errno: {}", errno);
+diff --git a/src/managers/KeybindManager.cpp b/src/managers/KeybindManager.cpp
+index fd7c4e72..12eaf88f 100644
+--- a/src/managers/KeybindManager.cpp
++++ b/src/managers/KeybindManager.cpp
+@@ -887,7 +887,9 @@ bool CKeybindManager::handleVT(xkb_keysym_t keysym) {
+ 
+         Log::logger->log(Log::DEBUG, "Switching from VT {} to VT {}", *CURRENT_TTY, TTY);
+ 
++#ifndef __APPLE__
+         g_pCompositor->m_aqBackend->session->switchVT(TTY);
++#endif
+     }
+ 
+     return true;
+diff --git a/src/managers/eventLoop/EventLoopManager.cpp b/src/managers/eventLoop/EventLoopManager.cpp
+index e38474aa..1270f0c1 100644
+--- a/src/managers/eventLoop/EventLoopManager.cpp
++++ b/src/managers/eventLoop/EventLoopManager.cpp
+@@ -119,7 +119,9 @@ void CEventLoopManager::enterLoop() {
+ 
+     // if we have a session, dispatch it to get the pending input devices
+     if (g_pCompositor->m_aqBackend->hasSession())
++#ifndef __APPLE__
+         g_pCompositor->m_aqBackend->session->dispatchPendingEventsAsync();
++#endif
+ 
+     wl_display_run(m_wayland.display);
+ 
+diff --git a/src/plugins/PluginAPI.cpp b/src/plugins/PluginAPI.cpp
+index 5f89da53..cf9fff76 100644
+--- a/src/plugins/PluginAPI.cpp
++++ b/src/plugins/PluginAPI.cpp
+@@ -9,6 +9,9 @@
+ #include "../layout/supplementary/WorkspaceAlgoMatcher.hpp"
+ #include <dlfcn.h>
+ #include <filesystem>
++#if defined(__APPLE__)
++#include <mach-o/dyld.h>
++#endif
+ 
+ #if defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__)
+ #include <sys/sysctl.h>
+@@ -338,6 +341,15 @@ APICALL std::vector<SFunctionMatch> HyprlandAPI::findFunctionsByName(HANDLE hand
+ #elif defined(__OpenBSD__)
+     // Neither KERN_PROC_PATHNAME nor /proc are supported
+     const auto FPATH = std::filesystem::canonical("/usr/local/bin/Hyprland");
++#elif defined(__APPLE__)
++    uint32_t exePathSize = 0;
++    _NSGetExecutablePath(nullptr, &exePathSize);
++    std::string executablePath(exePathSize, '\0');
++    _NSGetExecutablePath(executablePath.data(), &exePathSize);
++    std::error_code executablePathError;
++    auto FPATH = std::filesystem::weakly_canonical(std::filesystem::path(executablePath.c_str()), executablePathError);
++    if (executablePathError)
++        FPATH = std::filesystem::path(executablePath.c_str());
+ #else
+     const auto FPATH = std::filesystem::canonical("/proc/self/exe");
+ #endif
+diff --git a/src/protocols/DRMLease.cpp b/src/protocols/DRMLease.cpp
+index 2da7b04a..62df828e 100644
+--- a/src/protocols/DRMLease.cpp
++++ b/src/protocols/DRMLease.cpp
+@@ -51,6 +51,12 @@ CDRMLeaseResource::CDRMLeaseResource(SP<CWpDrmLeaseV1> resource_, SP<CDRMLeaseRe
+         outputs.emplace_back(m->m_monitor->m_output);
+     }
+ 
++#ifdef __APPLE__
++    LOGM(Log::ERR, "Rejecting lease: DRM leasing is unavailable on macOS");
++    m_resource->sendFinished();
++    return;
++#endif
++
+     auto aqlease = Aquamarine::CDRMLease::create(outputs);
+     if (!aqlease) {
+         LOGM(Log::ERR, "Rejecting lease: backend failed to alloc a lease");
+@@ -181,8 +187,12 @@ void CDRMLeaseConnectorResource::sendData() {
+     m_resource->sendName(m_monitor->m_name.c_str());
+     m_resource->sendDescription(m_monitor->m_description.c_str());
+ 
++#ifdef __APPLE__
++    m_resource->sendConnectorId(0);
++#else
+     auto AQDRMOutput = sc<Aquamarine::CDRMOutput*>(m_monitor->m_output.get());
+     m_resource->sendConnectorId(AQDRMOutput->getConnectorID());
++#endif
+ 
+     m_resource->sendDone();
+ }
+@@ -216,6 +226,11 @@ CDRMLeaseDeviceResource::CDRMLeaseDeviceResource(std::string deviceName_, SP<CWp
+         RESOURCE->m_parent = m_self;
+     });
+ 
++#ifdef __APPLE__
++    LOGM(Log::ERR, "DRM lease device resources are unavailable on macOS");
++    m_resource->sendDone();
++    return;
++#else
+     CFileDescriptor fd{PROTO::lease.at(m_deviceName)->m_backend.get()->getNonMasterFD()};
+     if (!fd.isValid()) {
+         LOGM(Log::ERR, "Failed to dup fd in lease");
+@@ -231,6 +246,7 @@ CDRMLeaseDeviceResource::CDRMLeaseDeviceResource(std::string deviceName_, SP<CWp
+     }
+ 
+     m_resource->sendDone();
++#endif
+ }
+ 
+ bool CDRMLeaseDeviceResource::good() {
+@@ -268,6 +284,9 @@ CDRMLeaseProtocol::CDRMLeaseProtocol(const wl_interface* iface, const int& ver,
+     m_backend    = sc<Aquamarine::CDRMBackend*>(backend_.get())->self.lock();
+     m_deviceName = m_backend->gpuName;
+ 
++#ifdef __APPLE__
++    return;
++#else
+     CFileDescriptor fd{m_backend->getNonMasterFD()};
+ 
+     if (!fd.isValid()) {
+@@ -276,6 +295,7 @@ CDRMLeaseProtocol::CDRMLeaseProtocol(const wl_interface* iface, const int& ver,
+     }
+ 
+     m_success = true;
++#endif
+ }
+ 
+ void CDRMLeaseProtocol::bindManager(wl_client* client, void* data, uint32_t ver, uint32_t id) {
+diff --git a/src/protocols/Viewporter.hpp b/src/protocols/Viewporter.hpp
+index d967da74..257b3206 100644
+--- a/src/protocols/Viewporter.hpp
++++ b/src/protocols/Viewporter.hpp
+@@ -3,7 +3,7 @@
+ #include <vector>
+ #include <cstdint>
+ #include "WaylandProtocol.hpp"
+-#include "viewporter.hpp"
++#include "../../protocols/viewporter.hpp"
+ #include "../helpers/signal/Signal.hpp"
+ 
+ class CWLSurfaceResource;
+diff --git a/src/render/OpenGL.cpp b/src/render/OpenGL.cpp
+index 1c30e3ed..67a227ce 100644
+--- a/src/render/OpenGL.cpp
++++ b/src/render/OpenGL.cpp
+@@ -148,7 +148,15 @@ void CHyprOpenGLImpl::initEGL(bool gbm) {
+ 
+     attrs.push_back(EGL_NONE);
+ 
++#if defined(__APPLE__)
++    if (!gbm) {
++        m_eglDisplay = m_proc.eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, nullptr, attrs.data());
++    } else {
++        m_eglDisplay = m_proc.eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR, m_gbmDevice, attrs.data());
++    }
++#else
+     m_eglDisplay = m_proc.eglGetPlatformDisplayEXT(gbm ? EGL_PLATFORM_GBM_KHR : EGL_PLATFORM_DEVICE_EXT, gbm ? m_gbmDevice : m_eglDevice, attrs.data());
++#endif
+     if (m_eglDisplay == EGL_NO_DISPLAY)
+         RASSERT(false, "EGL: failed to create a platform display");
+ 
+@@ -291,14 +299,18 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
+     loadGLProc(&m_proc.glEGLImageTargetTexture2DOES, "glEGLImageTargetTexture2DOES");
+     loadGLProc(&m_proc.eglDebugMessageControlKHR, "eglDebugMessageControlKHR");
+     loadGLProc(&m_proc.eglGetPlatformDisplayEXT, "eglGetPlatformDisplayEXT");
++#if !defined(__APPLE__)
+     loadGLProc(&m_proc.eglCreateSyncKHR, "eglCreateSyncKHR");
+     loadGLProc(&m_proc.eglDestroySyncKHR, "eglDestroySyncKHR");
+     loadGLProc(&m_proc.eglDupNativeFenceFDANDROID, "eglDupNativeFenceFDANDROID");
+     loadGLProc(&m_proc.eglWaitSyncKHR, "eglWaitSyncKHR");
++#endif
+ 
++#if !defined(__APPLE__)
+     RASSERT(m_proc.eglCreateSyncKHR, "Display driver doesn't support eglCreateSyncKHR");
+     RASSERT(m_proc.eglDupNativeFenceFDANDROID, "Display driver doesn't support eglDupNativeFenceFDANDROID");
+     RASSERT(m_proc.eglWaitSyncKHR, "Display driver doesn't support eglWaitSyncKHR");
++#endif
+ 
+     if (EGLEXTENSIONS.contains("EGL_EXT_device_base") || EGLEXTENSIONS.contains("EGL_EXT_device_enumeration"))
+         loadGLProc(&m_proc.eglQueryDevicesEXT, "eglQueryDevicesEXT");
+@@ -320,6 +332,13 @@ CHyprOpenGLImpl::CHyprOpenGLImpl() : m_drmFD(g_pCompositor->m_drmRenderNode.fd >
+     RASSERT(eglBindAPI(EGL_OPENGL_ES_API) != EGL_FALSE, "Couldn't bind to EGL's opengl ES API. This means your gpu driver f'd up. This is not a hyprland issue.");
+ 
+     bool success = false;
++#if defined(__APPLE__)
++    if (EGLEXTENSIONS.contains("EGL_MESA_platform_surfaceless")) {
++        success = true;
++        initEGL(false);
++    }
++#endif
++
+     if (EGLEXTENSIONS.contains("EXT_platform_device") || !m_proc.eglQueryDevicesEXT || !m_proc.eglQueryDeviceStringEXT) {
+         m_eglDevice = eglDeviceFromDRMFD(m_drmFD);
+ 
+diff --git a/start/src/core/Instance.cpp b/start/src/core/Instance.cpp
+index 2f5007bd..84341b86 100644
+--- a/start/src/core/Instance.cpp
++++ b/start/src/core/Instance.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include <cstdlib>
+ #include <cstring>
++#include <signal.h>
+ #include <sys/poll.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+diff --git a/start/src/helpers/Nix.cpp b/start/src/helpers/Nix.cpp
+index da66183e..a6ac2822 100644
+--- a/start/src/helpers/Nix.cpp
++++ b/start/src/helpers/Nix.cpp
+@@ -10,7 +10,9 @@
+ #include <hyprutils/os/Process.hpp>
+ #include <hyprutils/os/File.hpp>
+ 
++#ifndef __APPLE__
+ #include <glaze/glaze.hpp>
++#endif
+ 
+ using namespace Hyprutils::String;
+ using namespace Hyprutils::OS;
+@@ -82,6 +84,9 @@ std::expected<void, std::string> Nix::nixEnvironmentOk() {
+ }
+ 
+ bool Nix::shouldUseNixGL() {
++#ifdef __APPLE__
++    return false;
++#else
+     if (g_state->forceNixGl)
+         return true;
+ 
+@@ -122,4 +127,5 @@ bool Nix::shouldUseNixGL() {
+     }
+ 
+     return false;
++#endif
+ }

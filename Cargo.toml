@@ -2,6 +2,7 @@
 members = [
     "crates/macland-core",
     "crates/macland-cli",
+    "crates/macland-reference-client",
 ]
 resolver = "2"
 
@@ -9,4 +10,3 @@ resolver = "2"
 edition = "2024"
 license = "MIT"
 version = "0.1.0"
-

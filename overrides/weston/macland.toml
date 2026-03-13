@@ -7,7 +7,7 @@ build = ["ninja", "-C", "build", "frontend/weston", "kiosk-shell/kiosk-shell.dyl
 test = ["meson", "test", "-C", "build"]
 entrypoint = ["./build/frontend/weston", "--backend=headless", "--shell=kiosk-shell.so"]
 patch_policy = "compatibility-lane"
-sdk_features = ["metal-fast-path"]
+sdk_features = ["metal-fast-path", "seat-v1", "event-queue-v1"]
 protocol_expectations = ["xdg-shell"]
 
 [env]

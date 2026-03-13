@@ -2685,7 +2685,10 @@ pub const DEPENDENCIES: &[&str] = &[
 const DYNAMIC_LIBRARY_ALIASES: &[(&str, &[&str])] = &[
     (
         "libEGL.so.1",
-        &["/opt/homebrew/lib/libEGL.dylib", "/opt/homebrew/opt/mesa/lib/libEGL.dylib"],
+        &[
+            "/opt/homebrew/lib/libEGL.dylib",
+            "/opt/homebrew/opt/mesa/lib/libEGL.dylib",
+        ],
     ),
     (
         "libGLESv2.so.2",
@@ -2758,7 +2761,11 @@ fn install_dynamic_library_aliases(sysroot: &Path) -> Result<(), String> {
             continue;
         }
 
-        let Some(source_path) = candidates.iter().map(PathBuf::from).find(|path| path.exists()) else {
+        let Some(source_path) = candidates
+            .iter()
+            .map(PathBuf::from)
+            .find(|path| path.exists())
+        else {
             continue;
         };
 
@@ -2789,8 +2796,8 @@ fn install_stub_libraries(sysroot: &Path) -> Result<(), String> {
         let object_path = staging.join(format!("{stem}.o"));
         let library_path = sysroot.join("lib").join(library_name);
 
-        let source_contents = generated_stub_source(library_name)
-            .unwrap_or_else(|| (*source).to_string());
+        let source_contents =
+            generated_stub_source(library_name).unwrap_or_else(|| (*source).to_string());
         fs::write(&source_path, source_contents).map_err(|err| err.to_string())?;
         let compile_status = Command::new("cc")
             .args([

@@ -1,0 +1,16 @@
+id = "niri"
+repo = "https://github.com/YaLTeR/niri.git"
+rev = "main"
+build_system = "cargo"
+configure = ["cargo", "fetch"]
+build = ["cargo", "build", "--release", "--no-default-features"]
+test = ["cargo", "test", "--release", "--no-default-features", "-p", "niri-config", "-p", "niri-ipc", "--lib"]
+entrypoint = ["./target/release/niri"]
+patch_policy = "compatibility-lane"
+sdk_features = ["metal-fast-path", "seat-v1", "event-queue-v1"]
+protocol_expectations = ["xdg-shell"]
+
+[env]
+DISPLAY = "macland"
+MACLAND_HEADLESS = "1"
+RUSTFLAGS = "-C debuginfo=0 -C link-arg=-Wl,-ld_classic -C link-arg=-ludev"

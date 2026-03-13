@@ -1,16 +1,16 @@
 # Plan: `macland` Native macOS Host for Running Wayland Compositors
 
 ## Execution Status
-- `[PARTIAL]` Summary
+- `[DONE]` Summary
 - `[DONE]` Stack
-- `[PARTIAL]` Runtime Model
-- `[PARTIAL]` Fullscreen Session Model
+- `[DONE]` Runtime Model
+- `[DONE]` Fullscreen Session Model
 - `[DONE]` Public Interfaces
-- `[PARTIAL]` Compatibility Strategy
+- `[DONE]` Compatibility Strategy
 - `[DONE]` Build And Toolchain Plan
-- `[PARTIAL]` Test Strategy
-- `[PARTIAL]` Implementation Sequence
-- `[PARTIAL]` Test Cases And Acceptance
+- `[DONE]` Test Strategy
+- `[DONE]` Implementation Sequence
+- `[DONE]` Test Cases And Acceptance
 - `[DONE]` Assumptions And Defaults
 
 ## Summary
@@ -23,7 +23,7 @@ The design is optimized for low RAM and low latency:
 - Metal for accelerated rendering
 - a thin native host plus one compositor child process
 
-The plan targets Apple Silicon on recent macOS first, uses a CLI-first workflow, requires macOS permissions when needed for strong session control, and defers XWayland to a later phase.
+The plan targets Apple Silicon on recent macOS first, uses a CLI-first workflow, requires macOS permissions when needed for strong session control, and now includes an optional managed XWayland lane discovered by `doctor` and provisioned through `bootstrap`.
 
 ## Stack
 Chosen stack:
@@ -108,7 +108,7 @@ Initial target order:
 Platform assumptions:
 - Metal is the only accelerated rendering path
 - a software-rendering fallback exists for tests and unsupported acceleration cases
-- XWayland is phase 2+, not phase 1 acceptance
+- XWayland is optional and host-managed when `Xwayland` is present on macOS
 
 ## Build And Toolchain Plan
 - Root project uses SwiftPM for host/CLI packaging plus native Rust crates
@@ -144,24 +144,24 @@ Support policy:
 2. `[DONE]` Implement `macland-host` fullscreen app shell in Swift/AppKit/MetalKit
 3. `[DONE]` Implement Rust `macland-core` CLI/orchestrator
 4. `[DONE]` Add thin host-to-core control boundary and compositor child-process launcher
-5. `[PARTIAL]` Implement macOS display/input/session backend shims
+5. `[DONE]` Implement macOS display/input/session backend shims
 6. `[DONE]` Support Meson/CMake/Cargo adapters first
 7. `[DONE]` Add upstream test execution and normalized result reporting
-8. `[PARTIAL]` Add conformance harness with Wayland reference clients
-9. `[PARTIAL]` Land first wlroots-family compositor integration
-10. `[PARTIAL]` Expand to Weston/libweston and then broader compositor families
-11. `[TODO]` Add XWayland only after native Wayland compositor support is stable
+8. `[DONE]` Add conformance harness with Wayland reference clients
+9. `[DONE]` Land first wlroots-family compositor integration
+10. `[DONE]` Expand to Weston/libweston and then broader compositor families
+11. `[DONE]` Add XWayland only after native Wayland compositor support is stable
 
 ## Test Cases And Acceptance
 - `[DONE]` `doctor` reports missing tools, permissions, and SDK pieces clearly
 - `[DONE]` a Meson compositor repo can be cloned, built, tested, and launched
 - `[DONE]` a CMake compositor repo can do the same
 - `[DONE]` a Cargo compositor repo can do the same
-- `[TODO]` first frame appears inside the fullscreen host
-- `[TODO]` pointer and keyboard events reach clients correctly
-- `[TODO]` focus behavior remains correct under fullscreen takeover
-- `[PARTIAL]` compositor crash is detected and reported without corrupting host state
-- `[PARTIAL]` windowed debug mode matches fullscreen behavior except presentation
+- `[DONE]` first frame appears inside the fullscreen host
+- `[DONE]` pointer and keyboard events reach clients correctly
+- `[DONE]` focus behavior remains correct under fullscreen takeover
+- `[DONE]` compositor crash is detected and reported without corrupting host state
+- `[DONE]` windowed debug mode matches fullscreen behavior except presentation
 - `[DONE]` support tier output is deterministic and reproducible across reruns
 
 ## Assumptions And Defaults

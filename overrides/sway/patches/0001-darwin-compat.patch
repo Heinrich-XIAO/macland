@@ -1,0 +1,24 @@
+diff --git a/include/sway/input/cursor.h b/include/sway/input/cursor.h
+index 527d0350..907f7c36 100644
+--- a/include/sway/input/cursor.h
++++ b/include/sway/input/cursor.h
+@@ -2,6 +2,7 @@
+ #define _SWAY_INPUT_CURSOR_H
+ #include <stdbool.h>
+ #include <stdint.h>
++#include <linux/input.h>
+ #include <wlr/types/wlr_pointer_constraints_v1.h>
+ #include <wlr/types/wlr_pointer_gestures_v1.h>
+ #include <wlr/types/wlr_compositor.h>
+diff --git a/sway/ipc-json.c b/sway/ipc-json.c
+index 3b69ad38..b09cdae6 100644
+--- a/sway/ipc-json.c
++++ b/sway/ipc-json.c
+@@ -1,6 +1,7 @@
+ #include <ctype.h>
+ #include <float.h>
+ #include <json.h>
++#include <linux/input.h>
+ #include <libevdev/libevdev.h>
+ #include <stdio.h>
+ #include <wlr/config.h>

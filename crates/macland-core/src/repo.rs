@@ -83,18 +83,15 @@ impl RepoWorkspace {
     }
 
     pub fn load_manifest(&self, spec: &RepoSpec) -> Result<AdapterManifest, String> {
-        let repo_manifest_path = self.repo_root(spec).join("macland.toml");
         let override_manifest_path = self.override_manifest_path(spec);
-
-        if let Ok(contents) = fs::read_to_string(&repo_manifest_path) {
-            let manifest = AdapterManifest::from_toml(&contents)?;
-            if !is_uninitialized_manifest(&manifest) || !override_manifest_path.exists() {
-                return Ok(manifest);
-            }
+        if override_manifest_path.exists() {
+            let contents =
+                fs::read_to_string(&override_manifest_path).map_err(|err| err.to_string())?;
+            return AdapterManifest::from_toml(&contents);
         }
 
-        let contents =
-            fs::read_to_string(&override_manifest_path).map_err(|err| err.to_string())?;
+        let repo_manifest_path = self.repo_root(spec).join("macland.toml");
+        let contents = fs::read_to_string(&repo_manifest_path).map_err(|err| err.to_string())?;
         AdapterManifest::from_toml(&contents)
     }
 
@@ -153,7 +150,12 @@ impl RepoWorkspace {
         for patch_path in patch_paths {
             if git_command_succeeds(
                 &source_root,
-                ["apply", "--reverse", "--check", patch_path.to_string_lossy().as_ref()],
+                [
+                    "apply",
+                    "--reverse",
+                    "--check",
+                    patch_path.to_string_lossy().as_ref(),
+                ],
             )? {
                 continue;
             }
@@ -235,7 +237,10 @@ fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!("git {} failed with status {status}", args.join(" ")))
+        Err(format!(
+            "git {} failed with status {status}",
+            args.join(" ")
+        ))
     }
 }
 
@@ -311,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_override_manifest_when_repo_manifest_is_uninitialized() {
+    fn loads_override_manifest_even_when_repo_manifest_is_initialized() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -345,7 +350,10 @@ mod tests {
 
         let manifest = workspace.load_manifest(&spec).unwrap();
         assert_eq!(manifest.build_system, BuildSystem::Meson);
-        assert_eq!(manifest.entrypoint, vec!["./build/frontend/weston".to_string()]);
+        assert_eq!(
+            manifest.entrypoint,
+            vec!["./build/frontend/weston".to_string()]
+        );
     }
 
     #[test]
@@ -403,7 +411,10 @@ index df967b9..3a6eb07 100644
 
         let applied = workspace.apply_override_patches(&spec).unwrap();
         assert_eq!(applied.len(), 1);
-        assert_eq!(fs::read_to_string(source_root.join("demo.txt")).unwrap(), "after\n");
+        assert_eq!(
+            fs::read_to_string(source_root.join("demo.txt")).unwrap(),
+            "after\n"
+        );
 
         let applied_again = workspace.apply_override_patches(&spec).unwrap();
         assert!(applied_again.is_empty());

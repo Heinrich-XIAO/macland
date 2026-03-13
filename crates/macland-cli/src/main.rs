@@ -120,13 +120,12 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
             fs::create_dir_all(&repo_root).map_err(|err| err.to_string())?;
             fs::create_dir_all(&source_root).map_err(|err| err.to_string())?;
             workspace.write_repo_spec(&spec)?;
-            let manifest_path = if let Some(path) =
-                workspace.seed_manifest_from_override(&spec, false)?
-            {
-                path
-            } else {
-                workspace.write_manifest(&spec, &RepoWorkspace::adapter_template(&spec))?
-            };
+            let manifest_path =
+                if let Some(path) = workspace.seed_manifest_from_override(&spec, false)? {
+                    path
+                } else {
+                    workspace.write_manifest(&spec, &RepoWorkspace::adapter_template(&spec))?
+                };
             println!("registered repo: {}", spec.id);
             println!("repo root: {}", repo_root.display());
             println!("source root: {}", source_root.display());
@@ -365,6 +364,37 @@ fn run_test_action(
             )?;
         }
         println!("conformance_status_file: {}", report.status_file.display());
+        println!("conformance_reference_client_used: {}", report.reference_client_used);
+        println!("conformance_first_frame_presented: {}", report.first_frame_presented);
+        println!(
+            "conformance_keyboard_focus_observed: {}",
+            report.keyboard_focus_observed
+        );
+        println!(
+            "conformance_pointer_events_observed: {}",
+            report.pointer_events_observed
+        );
+        println!(
+            "conformance_key_events_observed: {}",
+            report.key_events_observed
+        );
+        println!("conformance_seat_present: {}", report.seat_present);
+        println!(
+            "conformance_virtual_pointer_supported: {}",
+            report.virtual_pointer_supported
+        );
+        println!(
+            "conformance_virtual_keyboard_supported: {}",
+            report.virtual_keyboard_supported
+        );
+        println!(
+            "conformance_pointer_injection_attempted: {}",
+            report.pointer_injection_attempted
+        );
+        println!(
+            "conformance_keyboard_injection_attempted: {}",
+            report.keyboard_injection_attempted
+        );
         println!("conformance_passed: {}", report.passed());
     }
 
@@ -540,37 +570,71 @@ fn ensure_wlroots_subproject(source_root: &Path) -> Result<(), String> {
     }
 
     let wlroots_root = source_root.join("subprojects").join("wlroots");
-    if wlroots_root.exists() {
+    if !wlroots_root.exists() {
+        let requested_series =
+            detect_wlroots_series(&contents).unwrap_or_else(|| "0.20".to_string());
+        let reference = resolve_wlroots_ref(&requested_series)?;
+
+        fs::create_dir_all(
+            wlroots_root
+                .parent()
+                .ok_or_else(|| "invalid wlroots subproject path".to_string())?,
+        )
+        .map_err(|err| err.to_string())?;
+
+        let status = Command::new("git")
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                &reference,
+                "https://gitlab.freedesktop.org/wlroots/wlroots.git",
+                wlroots_root.to_string_lossy().as_ref(),
+            ])
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !status.success() {
+            return Err(format!("wlroots clone failed with status {status}"));
+        }
+    }
+
+    ensure_wlroots_redirect_wraps(source_root)
+}
+
+fn ensure_wlroots_redirect_wraps(source_root: &Path) -> Result<(), String> {
+    let subprojects_root = source_root.join("subprojects");
+    if !subprojects_root.join("wlroots").exists() {
         return Ok(());
     }
 
-    let requested_series = detect_wlroots_series(&contents).unwrap_or_else(|| "0.20".to_string());
-    let reference = resolve_wlroots_ref(&requested_series)?;
+    for (name, target) in [
+        ("wayland.wrap", "wlroots/subprojects/wayland.wrap"),
+        ("libdrm.wrap", "wlroots/subprojects/libdrm.wrap"),
+        (
+            "libdisplay-info.wrap",
+            "wlroots/subprojects/libdisplay-info.wrap",
+        ),
+        ("libliftoff.wrap", "wlroots/subprojects/libliftoff.wrap"),
+    ] {
+        let redirect_path = subprojects_root.join(name);
+        if redirect_path.exists() {
+            continue;
+        }
 
-    fs::create_dir_all(
-        wlroots_root
-            .parent()
-            .ok_or_else(|| "invalid wlroots subproject path".to_string())?,
-    )
-    .map_err(|err| err.to_string())?;
+        let target_path = subprojects_root.join(target);
+        if !target_path.exists() {
+            continue;
+        }
 
-    let status = Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            &reference,
-            "https://gitlab.freedesktop.org/wlroots/wlroots.git",
-            wlroots_root.to_string_lossy().as_ref(),
-        ])
-        .status()
+        fs::write(
+            &redirect_path,
+            format!("[wrap-redirect]\nfilename = {target}\n"),
+        )
         .map_err(|err| err.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("wlroots clone failed with status {status}"))
     }
+
+    Ok(())
 }
 
 fn detect_wlroots_series(contents: &str) -> Option<String> {
@@ -710,7 +774,9 @@ struct PermissionProbeOutput {
 
 #[cfg(test)]
 mod sync_tests {
-    use super::detect_wlroots_series;
+    use super::{detect_wlroots_series, ensure_wlroots_redirect_wraps};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn detects_wlroots_series_from_dependency_name() {
@@ -725,6 +791,34 @@ mod sync_tests {
         assert_eq!(
             detect_wlroots_series("wlroots_version = ['>=0.19.0', '<0.20.0']"),
             Some("0.19".to_string())
+        );
+    }
+
+    #[test]
+    fn seeds_redirect_wraps_from_wlroots_subproject() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("macland-sync-tests-{suffix}"));
+        let source_root = root.join("source");
+        let wlroots_subprojects = source_root
+            .join("subprojects")
+            .join("wlroots")
+            .join("subprojects");
+        fs::create_dir_all(&wlroots_subprojects).unwrap();
+        fs::write(wlroots_subprojects.join("wayland.wrap"), "[wrap-git]\n").unwrap();
+        fs::write(wlroots_subprojects.join("libdrm.wrap"), "[wrap-git]\n").unwrap();
+
+        ensure_wlroots_redirect_wraps(&source_root).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(source_root.join("subprojects").join("wayland.wrap")).unwrap(),
+            "[wrap-redirect]\nfilename = wlroots/subprojects/wayland.wrap\n"
+        );
+        assert_eq!(
+            fs::read_to_string(source_root.join("subprojects").join("libdrm.wrap")).unwrap(),
+            "[wrap-redirect]\nfilename = wlroots/subprojects/libdrm.wrap\n"
         );
     }
 }

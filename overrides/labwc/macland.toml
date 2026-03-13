@@ -1,0 +1,17 @@
+id = "labwc"
+repo = "https://github.com/labwc/labwc.git"
+rev = "master"
+build_system = "meson"
+configure = ["meson", "setup", "build", "--reconfigure", "-Dwlroots:backends=x11", "-Dwlroots:session=disabled", "-Dwlroots:libliftoff=disabled", "-Dwlroots:xwayland=disabled", "-Dwlroots:color-management=disabled", "-Dwlroots:allocators=[]", "-Dwlroots:renderers=[]"]
+build = ["meson", "compile", "-C", "build"]
+test = ["meson", "test", "-C", "build"]
+entrypoint = ["./build/labwc"]
+patch_policy = "compatibility-lane"
+sdk_features = ["metal-fast-path", "seat-v1", "event-queue-v1"]
+protocol_expectations = ["xdg-shell", "layer-shell"]
+
+[env]
+WLR_BACKENDS = "headless"
+WLR_HEADLESS_OUTPUTS = "1"
+WLR_RENDERER = "pixman"
+WLR_LIBINPUT_NO_DEVICES = "1"
