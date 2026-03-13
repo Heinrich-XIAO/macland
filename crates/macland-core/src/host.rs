@@ -1,4 +1,5 @@
 use crate::adapter::AdapterManifest;
+use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -31,6 +32,12 @@ pub struct HostLaunchArtifacts {
     pub status_path: PathBuf,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HostStatusEnvelope {
+    status: String,
+}
+
 pub fn create_launch_request(
     manifest: &AdapterManifest,
     source_root: &Path,
@@ -44,6 +51,7 @@ pub fn create_launch_request(
     fs::create_dir_all(artifacts_root).map_err(|err| err.to_string())?;
     let request_path = artifacts_root.join("host-launch.json");
     let status_path = artifacts_root.join("host-status.txt");
+    let _ = fs::remove_file(&status_path);
     let request = HostLaunchRequest {
         mode,
         compositor_executable: Some(resolve_binary(source_root, binary).display().to_string()),
@@ -72,7 +80,22 @@ pub fn launch_host(host_binary: &Path, artifacts: &HostLaunchArtifacts) -> Resul
         .map_err(|err| err.to_string())?;
 
     if status.success() {
-        Ok(())
+        let status_payload = fs::read_to_string(&artifacts.status_path).map_err(|_| {
+            format!(
+                "host exited without writing status file {}",
+                artifacts.status_path.display()
+            )
+        })?;
+        let envelope: HostStatusEnvelope =
+            serde_json::from_str(&status_payload).map_err(|err| err.to_string())?;
+        if envelope.status == "host_started"
+            || envelope.status == "child_started"
+            || envelope.status == "child_exit:0"
+        {
+            Ok(())
+        } else {
+            Err(format!("host reported status {}", envelope.status))
+        }
     } else {
         Err(format!("host exited with status {status}"))
     }
@@ -89,9 +112,12 @@ fn resolve_binary(source_root: &Path, binary: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{HostSessionMode, create_launch_request};
+    use super::{HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host};
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn creates_launch_request_file() {
@@ -123,5 +149,59 @@ mod tests {
         assert!(contents.contains("/tmp/demo/bin/demo"));
     }
 
-    use std::path::Path;
+    #[test]
+    fn launch_host_requires_status_file() {
+        let temp = std::env::temp_dir().join(format!("macland-host-launch-{}", std::process::id()));
+        if temp.exists() {
+            fs::remove_dir_all(&temp).unwrap();
+        }
+        fs::create_dir_all(&temp).unwrap();
+
+        let host_binary = write_script(&temp.join("host-no-status.sh"), "#!/bin/sh\nexit 0\n");
+        let artifacts = HostLaunchArtifacts {
+            request_path: temp.join("request.json"),
+            status_path: temp.join("status.json"),
+        };
+        fs::write(&artifacts.request_path, "{}").unwrap();
+        let err = launch_host(&host_binary, &artifacts).unwrap_err();
+        assert!(err.contains("without writing status file"));
+
+        fs::remove_dir_all(&temp).unwrap();
+    }
+
+    #[test]
+    fn launch_host_reports_failure_status() {
+        let temp =
+            std::env::temp_dir().join(format!("macland-host-launch-fail-{}", std::process::id()));
+        if temp.exists() {
+            fs::remove_dir_all(&temp).unwrap();
+        }
+        fs::create_dir_all(&temp).unwrap();
+
+        let status_path = temp.join("status.json");
+        let host_binary = write_script(
+            &temp.join("host-fail-status.sh"),
+            &format!(
+                "#!/bin/sh\ncat <<'EOF' > \"{}\"\n{{\"status\":\"child_failed:test\"}}\nEOF\nexit 0\n",
+                status_path.display()
+            ),
+        );
+        let artifacts = HostLaunchArtifacts {
+            request_path: temp.join("request.json"),
+            status_path: status_path.clone(),
+        };
+        fs::write(&artifacts.request_path, "{}").unwrap();
+        let err = launch_host(&host_binary, &artifacts).unwrap_err();
+        assert!(err.contains("child_failed:test"));
+
+        fs::remove_dir_all(&temp).unwrap();
+    }
+
+    fn write_script(path: &Path, contents: &str) -> PathBuf {
+        fs::write(path, contents).unwrap();
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+        path.to_path_buf()
+    }
 }

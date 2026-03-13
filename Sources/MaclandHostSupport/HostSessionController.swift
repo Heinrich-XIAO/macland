@@ -7,6 +7,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     private let configuration: HostLaunchConfiguration
     private var window: NSWindow?
     private var compositorProcess: Process?
+    private var managedRuntimeDirectory: URL?
 
     public init(configuration: HostLaunchConfiguration) {
         self.configuration = configuration
@@ -48,6 +49,9 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         compositorProcess?.terminate()
+        if let managedRuntimeDirectory {
+            try? FileManager.default.removeItem(at: managedRuntimeDirectory)
+        }
     }
 
     private func applyPresentationMode() {
@@ -82,15 +86,24 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         for (key, value) in configuration.environment {
             environment[key] = value
         }
+        if environment["XDG_RUNTIME_DIR"] == nil || environment["XDG_RUNTIME_DIR"]?.isEmpty == true {
+            if let runtimeDirectory = prepareRuntimeDirectory() {
+                environment["XDG_RUNTIME_DIR"] = runtimeDirectory.path
+            }
+        }
         process.environment = environment
         let statusFile = configuration.statusFile
         let autoExitAfterChild = configuration.autoExitAfterChild
         process.terminationHandler = { process in
             if let statusFile {
-                try? "child_exit:\(process.terminationStatus)\n".write(
+                let payload = StatusEnvelope(
+                    status: "child_exit:\(process.terminationStatus)",
+                    permissions: PermissionProbe.currentAudit().stringStates
+                )
+                let data = try? JSONEncoder().encode(payload)
+                try? data?.write(
                     to: URL(fileURLWithPath: statusFile),
-                    atomically: true,
-                    encoding: .utf8
+                    options: .atomic
                 )
             }
             if autoExitAfterChild {
@@ -127,6 +140,31 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
             to: URL(fileURLWithPath: statusFile),
             options: .atomic
         )
+    }
+
+    private func prepareRuntimeDirectory() -> URL? {
+        if let managedRuntimeDirectory {
+            return managedRuntimeDirectory
+        }
+
+        let runtimeDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("macland-runtime", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: runtimeDirectory,
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: runtimeDirectory.path
+            )
+            managedRuntimeDirectory = runtimeDirectory
+            return runtimeDirectory
+        } catch {
+            writeStatus("runtime_dir_failed:\(error.localizedDescription)")
+            return nil
+        }
     }
 }
 
