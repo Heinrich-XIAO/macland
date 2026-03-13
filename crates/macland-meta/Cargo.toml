@@ -1,0 +1,12 @@
+[package]
+name = "macland-meta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[lib]
+path = "src/lib.rs"
+test = false
+doctest = false
+bench = false

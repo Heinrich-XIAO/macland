@@ -3,7 +3,9 @@ members = [
     "crates/macland-core",
     "crates/macland-cli",
     "crates/macland-reference-client",
+    "crates/macland-meta",
 ]
+default-members = ["crates/macland-meta"]
 resolver = "2"
 
 [workspace.package]
