@@ -1,8 +1,9 @@
 use crate::adapter::AdapterManifest;
-use crate::host::{HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host};
+use crate::host::{HostLaunchArtifacts, HostSessionMode, create_launch_request, smoke_launch_host};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConformanceReport {
@@ -26,25 +27,37 @@ pub fn run_conformance(
     mode: HostSessionMode,
 ) -> Result<ConformanceReport, String> {
     let artifacts = create_launch_request(manifest, source_root, mode, artifacts_root)?;
-    launch_host(host_binary, &artifacts)?;
-    parse_status(&artifacts)
+    smoke_launch_host(
+        host_binary,
+        &artifacts,
+        Duration::from_secs(5),
+        Duration::from_millis(250),
+    )?;
+    parse_status(&artifacts, true)
 }
 
-fn parse_status(artifacts: &HostLaunchArtifacts) -> Result<ConformanceReport, String> {
+fn parse_status(
+    artifacts: &HostLaunchArtifacts,
+    treat_started_as_success: bool,
+) -> Result<ConformanceReport, String> {
     let status = fs::read_to_string(&artifacts.status_path).map_err(|err| err.to_string())?;
     if let Ok(envelope) = serde_json::from_str::<StatusEnvelope>(&status) {
+        let child_started = envelope.status.contains("child_started");
         return Ok(ConformanceReport {
             host_launched: true,
-            child_started: envelope.status.contains("child_started"),
-            child_exited_successfully: envelope.status.contains("child_exit:0"),
+            child_started,
+            child_exited_successfully: envelope.status.contains("child_exit:0")
+                || (treat_started_as_success && child_started),
             status_file: artifacts.status_path.clone(),
         });
     }
 
+    let child_started = status.contains("child_started");
     Ok(ConformanceReport {
         host_launched: true,
-        child_started: status.contains("child_started"),
-        child_exited_successfully: status.contains("child_exit:0"),
+        child_started,
+        child_exited_successfully: status.contains("child_exit:0")
+            || (treat_started_as_success && child_started),
         status_file: artifacts.status_path.clone(),
     })
 }

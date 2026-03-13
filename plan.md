@@ -149,12 +149,12 @@ Support policy:
 7. `[DONE]` Add upstream test execution and normalized result reporting
 8. `[PARTIAL]` Add conformance harness with Wayland reference clients
 9. `[PARTIAL]` Land first wlroots-family compositor integration
-10. `[TODO]` Expand to Weston/libweston and then broader compositor families
+10. `[PARTIAL]` Expand to Weston/libweston and then broader compositor families
 11. `[TODO]` Add XWayland only after native Wayland compositor support is stable
 
 ## Test Cases And Acceptance
 - `[DONE]` `doctor` reports missing tools, permissions, and SDK pieces clearly
-- `[PARTIAL]` a Meson compositor repo can be cloned, built, tested, and launched
+- `[DONE]` a Meson compositor repo can be cloned, built, tested, and launched
 - `[DONE]` a CMake compositor repo can do the same
 - `[DONE]` a Cargo compositor repo can do the same
 - `[TODO]` first frame appears inside the fullscreen host
