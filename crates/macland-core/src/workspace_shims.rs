@@ -2014,6 +2014,27 @@ int macland_librt_stub(void) {
 "#,
     ),
     (
+        "libinput.a",
+        r#"int macland_libinput_stub(void) {
+    return 0;
+}
+"#,
+    ),
+    (
+        "libudev.a",
+        r#"int macland_libudev_stub(void) {
+    return 0;
+}
+"#,
+    ),
+    (
+        "libevdev.a",
+        r#"int macland_libevdev_stub(void) {
+    return 0;
+}
+"#,
+    ),
+    (
         "libseat.a",
         r#"#include <errno.h>
 #include <stdlib.h>
@@ -2232,6 +2253,9 @@ mod tests {
         assert!(sysroot.join("include/sys/inotify.h").exists());
         assert!(sysroot.join("include/sys/timerfd.h").exists());
         assert!(sysroot.join("lib/librt.a").exists());
+        assert!(sysroot.join("lib/libinput.a").exists());
+        assert!(sysroot.join("lib/libudev.a").exists());
+        assert!(sysroot.join("lib/libevdev.a").exists());
         assert!(sysroot.join("lib/libseat.a").exists());
         let xf86drm = fs::read_to_string(sysroot.join("include/xf86drm.h")).unwrap();
         assert!(xf86drm.contains("drmGetVersion"));
