@@ -83,6 +83,10 @@ const FILES: &[(&str, &str)] = &[
 #define DRM_FORMAT_S016 fourcc_code('S', '0', '1', '6')
 #define DRM_FORMAT_S210 fourcc_code('S', '2', '1', '0')
 #define DRM_FORMAT_S212 fourcc_code('S', '2', '1', '2')
+#define DRM_FORMAT_S216 fourcc_code('S', '2', '1', '6')
+#define DRM_FORMAT_S410 fourcc_code('S', '4', '1', '0')
+#define DRM_FORMAT_S412 fourcc_code('S', '4', '1', '2')
+#define DRM_FORMAT_S416 fourcc_code('S', '4', '1', '6')
 #define DRM_FORMAT_R16F fourcc_code('R', '1', '6', 'H')
 #define DRM_FORMAT_R32F fourcc_code('R', '3', '2', 'F')
 #define DRM_FORMAT_GR1616F fourcc_code('G', 'R', '2', 'H')
@@ -92,6 +96,36 @@ const FILES: &[(&str, &str)] = &[
 #define DRM_FORMAT_BGR323232F fourcc_code('B', 'G', '3', 'F')
 #define DRM_FORMAT_ABGR32323232F fourcc_code('A', 'B', '4', 'F')
 #define DRM_FORMAT_AYUV fourcc_code('A', 'Y', 'U', 'V')
+#define DRM_FORMAT_UYVY fourcc_code('U', 'Y', 'V', 'Y')
+#define DRM_FORMAT_VUY888 fourcc_code('V', 'U', '2', '4')
+#define DRM_FORMAT_VUY101010 fourcc_code('V', 'U', '3', '0')
+#define DRM_FORMAT_XYUV8888 fourcc_code('X', 'Y', 'U', 'V')
+#define DRM_FORMAT_Y210 fourcc_code('Y', '2', '1', '0')
+#define DRM_FORMAT_Y212 fourcc_code('Y', '2', '1', '2')
+#define DRM_FORMAT_Y216 fourcc_code('Y', '2', '1', '6')
+#define DRM_FORMAT_Y410 fourcc_code('Y', '4', '1', '0')
+#define DRM_FORMAT_Y412 fourcc_code('Y', '4', '1', '2')
+#define DRM_FORMAT_Y416 fourcc_code('Y', '4', '1', '6')
+#define DRM_FORMAT_XVYU2101010 fourcc_code('X', 'V', '3', '0')
+#define DRM_FORMAT_XVYU12_16161616 fourcc_code('X', 'V', '3', '6')
+#define DRM_FORMAT_XVYU16161616 fourcc_code('X', 'V', '4', '8')
+#define DRM_FORMAT_Y0L0 fourcc_code('Y', '0', 'L', '0')
+#define DRM_FORMAT_X0L0 fourcc_code('X', '0', 'L', '0')
+#define DRM_FORMAT_Y0L2 fourcc_code('Y', '0', 'L', '2')
+#define DRM_FORMAT_X0L2 fourcc_code('X', '0', 'L', '2')
+#define DRM_FORMAT_YUV410 fourcc_code('Y', 'U', 'V', '9')
+#define DRM_FORMAT_YVU410 fourcc_code('Y', 'V', 'U', '9')
+#define DRM_FORMAT_YUV411 fourcc_code('Y', 'U', '1', '1')
+#define DRM_FORMAT_YVU411 fourcc_code('Y', 'V', '1', '1')
+#define DRM_FORMAT_YUV420 fourcc_code('Y', 'U', '1', '2')
+#define DRM_FORMAT_YVU420 fourcc_code('Y', 'V', '1', '2')
+#define DRM_FORMAT_YUV422 fourcc_code('Y', 'U', '1', '6')
+#define DRM_FORMAT_YVU422 fourcc_code('Y', 'V', '1', '6')
+#define DRM_FORMAT_YUV444 fourcc_code('Y', 'U', '2', '4')
+#define DRM_FORMAT_YVU444 fourcc_code('Y', 'V', '2', '4')
+#define DRM_FORMAT_YUYV fourcc_code('Y', 'U', 'Y', 'V')
+#define DRM_FORMAT_YUV420_8BIT fourcc_code('Y', 'U', '0', '8')
+#define DRM_FORMAT_YUV420_10BIT fourcc_code('Y', 'U', '1', '0')
 
 #define DRM_FORMAT_MOD_LINEAR 0ULL
 #define DRM_FORMAT_MOD_INVALID ((1ULL << 56) - 1ULL)
@@ -169,6 +203,11 @@ static inline int drmGetDevice(int fd, drmDevicePtr* device) {
     }
     errno = ENODEV;
     return -1;
+}
+
+static inline int drmGetDevice2(int fd, uint32_t flags, drmDevicePtr* device) {
+    (void)flags;
+    return drmGetDevice(fd, device);
 }
 
 static inline int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags, drmDevicePtr* device) {
@@ -253,6 +292,25 @@ static inline int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags, in
     errno = ENOTSUP;
     return -1;
 }
+
+static inline int drmPrimeFDToHandle(int fd, int prime_fd, uint32_t* handle) {
+    (void)fd;
+    (void)prime_fd;
+    if (handle) {
+        *handle = 0;
+    }
+    errno = ENOTSUP;
+    return -1;
+}
+
+#ifndef MACLAND_DRM_CLOSE_BUFFER_HANDLE_DEFINED
+#define MACLAND_DRM_CLOSE_BUFFER_HANDLE_DEFINED 1
+static inline int drmCloseBufferHandle(int fd, uint32_t handle) {
+    (void)fd;
+    (void)handle;
+    return 0;
+}
+#endif
 
 static inline int drmIoctl(int fd, unsigned long request, void* arg) {
     (void)fd;
@@ -446,6 +504,12 @@ static inline int drmModeDestroyDumbBuffer(int fd, uint32_t handle) {
 
 #define DRM_DISPLAY_MODE_LEN 32
 #define DRM_MODE_CONTENT_TYPE_GRAPHICS 0
+#define DRM_MODE_TYPE_USERDEF (1U << 5)
+#define DRM_MODE_FLAG_PHSYNC (1U << 0)
+#define DRM_MODE_FLAG_NHSYNC (1U << 1)
+#define DRM_MODE_FLAG_PVSYNC (1U << 2)
+#define DRM_MODE_FLAG_NVSYNC (1U << 3)
+#define DRM_MODE_FLAG_INTERLACE (1U << 4)
 #define DRM_PROP_NAME_LEN 32
 #define DRM_PLANE_TYPE_OVERLAY 0
 #define DRM_PLANE_TYPE_PRIMARY 1
@@ -589,11 +653,14 @@ static inline void drmModeFreeFB2(drmModeFB2* fb) {
     free(fb);
 }
 
+#ifndef MACLAND_DRM_CLOSE_BUFFER_HANDLE_DEFINED
+#define MACLAND_DRM_CLOSE_BUFFER_HANDLE_DEFINED 1
 static inline int drmCloseBufferHandle(int fd, uint32_t handle) {
     (void)fd;
     (void)handle;
     return 0;
 }
+#endif
 
 #endif
 "#,
@@ -1459,11 +1526,71 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
 "#,
     ),
     (
+        "include/linux/input.h",
+        r#"#ifndef MACLAND_LINUX_INPUT_H
+#define MACLAND_LINUX_INPUT_H
+
+#include <linux/input-event-codes.h>
+
+#endif
+"#,
+    ),
+    (
         "include/sys/eventfd.h",
         r#"#ifndef MACLAND_SYS_EVENTFD_H
 #define MACLAND_SYS_EVENTFD_H
 
 #include <libepoll-shim/sys/eventfd.h>
+
+#endif
+"#,
+    ),
+    (
+        "include/sys/inotify.h",
+        r#"#ifndef MACLAND_SYS_INOTIFY_H
+#define MACLAND_SYS_INOTIFY_H
+
+#include <errno.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define IN_MODIFY 0x00000002
+#define IN_DONT_FOLLOW 0x02000000
+
+struct inotify_event {
+    int wd;
+    uint32_t mask;
+    uint32_t cookie;
+    uint32_t len;
+    char name[];
+};
+
+static inline int inotify_init(void) {
+    errno = ENOSYS;
+    return -1;
+}
+
+static inline int inotify_add_watch(int fd, const char* pathname, uint32_t mask) {
+    (void)fd;
+    (void)pathname;
+    (void)mask;
+    errno = ENOSYS;
+    return -1;
+}
+
+static inline int inotify_rm_watch(int fd, int wd) {
+    (void)fd;
+    (void)wd;
+    errno = ENOSYS;
+    return -1;
+}
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 "#,
@@ -1483,7 +1610,51 @@ static inline int libevdev_event_code_from_name(unsigned int type, const char* n
         r#"#ifndef MACLAND_SYS_TIMERFD_H
 #define MACLAND_SYS_TIMERFD_H
 
-#include <libepoll-shim/sys/timerfd.h>
+#include <errno.h>
+#include <stdint.h>
+#include <time.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define TFD_CLOEXEC 0x1
+#define TFD_NONBLOCK 0x2
+#define TFD_TIMER_ABSTIME 0x1
+#define TFD_TIMER_CANCEL_ON_SET 0x2
+
+static inline int timerfd_create(int clockid, int flags) {
+    (void)clockid;
+    (void)flags;
+    errno = ENOSYS;
+    return -1;
+}
+
+static inline int timerfd_settime(int fd, int flags, const struct itimerspec* new_value,
+        struct itimerspec* old_value) {
+    (void)fd;
+    (void)flags;
+    (void)new_value;
+    (void)old_value;
+    errno = ENOSYS;
+    return -1;
+}
+
+static inline int timerfd_gettime(int fd, struct itimerspec* curr_value) {
+    (void)fd;
+    if (curr_value) {
+        curr_value->it_interval.tv_sec = 0;
+        curr_value->it_interval.tv_nsec = 0;
+        curr_value->it_value.tv_sec = 0;
+        curr_value->it_value.tv_nsec = 0;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 "#,
@@ -1765,7 +1936,28 @@ pub fn install_workspace_shims(workspace_root: &Path) -> Result<PathBuf, String>
         fs::write(&path, contents).map_err(|err| err.to_string())?;
     }
     install_stub_libraries(&sysroot)?;
+    patch_vendor_headers(&sysroot)?;
     Ok(sysroot)
+}
+
+fn patch_vendor_headers(sysroot: &Path) -> Result<(), String> {
+    let aquamarine_backend = sysroot.join("include/aquamarine/backend/Backend.hpp");
+    if aquamarine_backend.exists() {
+        let contents = fs::read_to_string(&aquamarine_backend).map_err(|err| err.to_string())?;
+        if !contents.contains("#include \"Session.hpp\"") {
+            let updated = if contents.contains("#include \"Misc.hpp\"") {
+                contents.replace(
+                    "#include \"Misc.hpp\"",
+                    "#include \"Misc.hpp\"\n#include \"Session.hpp\"",
+                )
+            } else {
+                format!("#include \"Session.hpp\"\n{contents}")
+            };
+            fs::write(&aquamarine_backend, updated).map_err(|err| err.to_string())?;
+        }
+    }
+
+    Ok(())
 }
 
 fn install_stub_libraries(sysroot: &Path) -> Result<(), String> {
@@ -1844,8 +2036,35 @@ mod tests {
         assert!(sysroot.join("include/libseat.h").exists());
         assert!(sysroot.join("include/libevdev/libevdev.h").exists());
         assert!(sysroot.join("include/linux/input-event-codes.h").exists());
+        assert!(sysroot.join("include/linux/input.h").exists());
+        assert!(sysroot.join("include/sys/inotify.h").exists());
+        assert!(sysroot.join("include/sys/timerfd.h").exists());
         assert!(sysroot.join("lib/librt.a").exists());
         assert!(sysroot.join("lib/libseat.a").exists());
+
+        fs::remove_dir_all(&temp).unwrap();
+    }
+
+    #[test]
+    fn patches_aquamarine_backend_header() {
+        let temp =
+            std::env::temp_dir().join(format!("macland-aquamarine-header-{}", std::process::id()));
+        if temp.exists() {
+            fs::remove_dir_all(&temp).unwrap();
+        }
+
+        let backend_header = temp.join(".macland/sysroot/include/aquamarine/backend/Backend.hpp");
+        fs::create_dir_all(backend_header.parent().unwrap()).unwrap();
+        fs::write(
+            &backend_header,
+            "#pragma once\n#include \"Misc.hpp\"\nnamespace Aquamarine { class CSession; }\n",
+        )
+        .unwrap();
+
+        let sysroot = install_workspace_shims(&temp).unwrap();
+        let patched =
+            fs::read_to_string(sysroot.join("include/aquamarine/backend/Backend.hpp")).unwrap();
+        assert!(patched.contains("#include \"Session.hpp\""));
 
         fs::remove_dir_all(&temp).unwrap();
     }
