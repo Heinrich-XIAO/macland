@@ -1,5 +1,18 @@
 # Plan: `macland` Native macOS Host for Running Wayland Compositors
 
+## Execution Status
+- `[PARTIAL]` Summary
+- `[DONE]` Stack
+- `[PARTIAL]` Runtime Model
+- `[PARTIAL]` Fullscreen Session Model
+- `[DONE]` Public Interfaces
+- `[PARTIAL]` Compatibility Strategy
+- `[DONE]` Build And Toolchain Plan
+- `[PARTIAL]` Test Strategy
+- `[PARTIAL]` Implementation Sequence
+- `[PARTIAL]` Test Cases And Acceptance
+- `[DONE]` Assumptions And Defaults
+
 ## Summary
 Build a greenfield native macOS platform that lets a user select a Wayland compositor repo, build it on macOS, run its upstream tests where possible, and launch it inside a dedicated fullscreen macOS host session.
 
@@ -127,29 +140,29 @@ Support policy:
 - known platform-inapplicable failures can be waived if conformance and runtime criteria pass
 
 ## Implementation Sequence
-1. Build `macland doctor` and workspace-local tool bootstrap
-2. Implement `macland-host` fullscreen app shell in Swift/AppKit/MetalKit
-3. Implement Rust `macland-core` CLI/orchestrator
-4. Add thin host-to-core control boundary and compositor child-process launcher
-5. Implement macOS display/input/session backend shims
-6. Support Meson/CMake/Cargo adapters first
-7. Add upstream test execution and normalized result reporting
-8. Add conformance harness with Wayland reference clients
-9. Land first wlroots-family compositor integration
-10. Expand to Weston/libweston and then broader compositor families
-11. Add XWayland only after native Wayland compositor support is stable
+1. `[DONE]` Build `macland doctor` and workspace-local tool bootstrap
+2. `[DONE]` Implement `macland-host` fullscreen app shell in Swift/AppKit/MetalKit
+3. `[DONE]` Implement Rust `macland-core` CLI/orchestrator
+4. `[DONE]` Add thin host-to-core control boundary and compositor child-process launcher
+5. `[PARTIAL]` Implement macOS display/input/session backend shims
+6. `[DONE]` Support Meson/CMake/Cargo adapters first
+7. `[DONE]` Add upstream test execution and normalized result reporting
+8. `[PARTIAL]` Add conformance harness with Wayland reference clients
+9. `[PARTIAL]` Land first wlroots-family compositor integration
+10. `[TODO]` Expand to Weston/libweston and then broader compositor families
+11. `[TODO]` Add XWayland only after native Wayland compositor support is stable
 
 ## Test Cases And Acceptance
-- `doctor` reports missing tools, permissions, and SDK pieces clearly
-- a Meson compositor repo can be cloned, built, tested, and launched
-- a CMake compositor repo can do the same
-- a Cargo compositor repo can do the same
-- first frame appears inside the fullscreen host
-- pointer and keyboard events reach clients correctly
-- focus behavior remains correct under fullscreen takeover
-- compositor crash is detected and reported without corrupting host state
-- windowed debug mode matches fullscreen behavior except presentation
-- support tier output is deterministic and reproducible across reruns
+- `[DONE]` `doctor` reports missing tools, permissions, and SDK pieces clearly
+- `[PARTIAL]` a Meson compositor repo can be cloned, built, tested, and launched
+- `[DONE]` a CMake compositor repo can do the same
+- `[DONE]` a Cargo compositor repo can do the same
+- `[TODO]` first frame appears inside the fullscreen host
+- `[TODO]` pointer and keyboard events reach clients correctly
+- `[TODO]` focus behavior remains correct under fullscreen takeover
+- `[PARTIAL]` compositor crash is detected and reported without corrupting host state
+- `[PARTIAL]` windowed debug mode matches fullscreen behavior except presentation
+- `[DONE]` support tier output is deterministic and reproducible across reruns
 
 ## Assumptions And Defaults
 - repo is currently empty, so implementation starts from scratch
