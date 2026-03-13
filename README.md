@@ -13,7 +13,7 @@ This repository currently contains:
 ## Workspace layout
 
 - `Package.swift`: Swift package for the host app and host support code
-- `Cargo.toml`: Rust workspace for `macland-core` and `macland-cli`
+- `Cargo.toml`: Rust workspace for `macland-core`, the `macland-exec` control-plane binary, and support crates
 - `Sources/`: Swift sources
 - `Tests/`: Swift tests
 - `crates/`: Rust crates
@@ -29,6 +29,6 @@ cargo test
 ## Run
 
 ```bash
-cargo run -p macland-cli -- doctor
+./macland doctor
 swift run macland-host --windowed-debug
 ```

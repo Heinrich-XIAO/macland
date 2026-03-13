@@ -167,7 +167,7 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
             println!("synced repo: {repo_id}");
             Ok(())
         }
-        _ => Err("usage: macland-cli repo <add|sync> ...".to_string()),
+        _ => Err("usage: macland repo <add|sync> ...".to_string()),
     }
 }
 
@@ -465,7 +465,7 @@ fn infer_repo_id(url: &str) -> String {
 }
 
 fn print_help() {
-    println!("macland-cli commands:");
+    println!("macland commands:");
     println!("  doctor");
     println!("  bootstrap [--execute]");
     println!("  repo add <git-url> [--rev <commit>]");

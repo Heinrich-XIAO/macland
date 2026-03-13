@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "macland-exec"
+path = "src/main.rs"
+
 [dependencies]
 macland-core = { path = "../macland-core" }
 serde = { version = "1", features = ["derive"] }

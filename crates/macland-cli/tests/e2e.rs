@@ -110,7 +110,7 @@ fn cli_exercises_repo_workflow() {
     create_git_fixture(&fixture_root, &source_repo);
 
     fs::create_dir_all(&workspace).unwrap();
-    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-exec"));
     let repo_url = source_repo.display().to_string();
 
     output(
@@ -207,7 +207,7 @@ fn cli_autodetects_cargo_repo_workflow() {
     create_git_fixture(&fixture_root, &source_repo);
     fs::create_dir_all(&workspace).unwrap();
 
-    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-exec"));
     let repo_url = source_repo.display().to_string();
     let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
 
@@ -253,7 +253,7 @@ fn cli_autodetects_cmake_repo_workflow() {
     create_git_fixture(&fixture_root, &source_repo);
     fs::create_dir_all(&workspace).unwrap();
 
-    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-exec"));
     let repo_url = source_repo.display().to_string();
     let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
 
@@ -297,7 +297,7 @@ fn cli_autodetects_meson_repo_workflow() {
     create_git_fixture(&fixture_root, &source_repo);
     fs::create_dir_all(&workspace).unwrap();
 
-    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-exec"));
     let repo_url = source_repo.display().to_string();
     let repo_id = source_repo.file_name().unwrap().to_str().unwrap();
 
@@ -369,7 +369,7 @@ fn repo_sync_initializes_recursive_submodules() {
         .current_dir(&parent_repo));
     commit_all(&parent_repo, "parent");
 
-    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-cli"));
+    let binary = PathBuf::from(env!("CARGO_BIN_EXE_macland-exec"));
     let repo_url = parent_repo.display().to_string();
     let repo_id = parent_repo.file_name().unwrap().to_str().unwrap();
 

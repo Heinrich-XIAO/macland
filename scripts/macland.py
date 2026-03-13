@@ -122,7 +122,7 @@ def require_arg(argv: list[str], index: int, message: str) -> str:
 
 def handle_repo(workspace: Path, args: list[str]) -> None:
     if not args:
-        raise CliError("usage: macland-cli repo <add|sync> ...")
+        raise CliError("usage: macland repo <add|sync> ...")
     if args[0] == "add":
         repo_url = require_arg(args, 1, "missing git url")
         rev = None
@@ -172,7 +172,7 @@ def handle_repo(workspace: Path, args: list[str]) -> None:
         print(f"synced repo: {repo_id}")
         return
 
-    raise CliError("usage: macland-cli repo <add|sync> ...")
+    raise CliError("usage: macland repo <add|sync> ...")
 
 
 def run_bootstrap(workspace: Path, execute: bool) -> None:
@@ -631,7 +631,7 @@ def tool_missing(tool: str) -> bool:
 
 
 def print_help() -> None:
-    print("usage: macland-cli <command> [options]")
+    print("usage: macland <command> [options]")
     print("commands:")
     print("  doctor")
     print("  bootstrap [--execute]")
