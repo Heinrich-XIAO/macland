@@ -5,9 +5,13 @@ build_system = "meson"
 configure = ["meson", "setup", "build", "--reconfigure", "-Dwlroots:backends=x11", "-Dwlroots:session=disabled", "-Dwlroots:libliftoff=disabled", "-Dwlroots:xwayland=disabled", "-Dwlroots:color-management=disabled", "-Dwlroots:allocators=[]", "-Dwlroots:renderers=[]"]
 build = ["meson", "compile", "-C", "build"]
 test = ["meson", "test", "-C", "build"]
-entrypoint = ["./build/sway/sway"]
+entrypoint = ["./build/sway/sway", "-c", "../macland/sway.conf"]
 patch_policy = "prefer-none"
 sdk_features = ["metal-fast-path"]
 protocol_expectations = ["xdg-shell"]
 
 [env]
+WLR_BACKENDS = "headless"
+WLR_HEADLESS_OUTPUTS = "1"
+WLR_RENDERER = "pixman"
+WLR_LIBINPUT_NO_DEVICES = "1"

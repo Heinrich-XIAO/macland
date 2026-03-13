@@ -11,3 +11,7 @@ sdk_features = ["metal-fast-path"]
 protocol_expectations = ["xdg-shell"]
 
 [env]
+WLR_BACKENDS = "headless"
+WLR_HEADLESS_OUTPUTS = "1"
+WLR_RENDERER = "pixman"
+WLR_LIBINPUT_NO_DEVICES = "1"

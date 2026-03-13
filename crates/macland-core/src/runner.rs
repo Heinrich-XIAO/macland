@@ -92,7 +92,7 @@ pub fn execute_command_line(
     }
 }
 
-fn effective_env(env_pairs: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+pub fn effective_env(env_pairs: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut merged = env_pairs.clone();
     if let Some(path) = merged_pkg_config_path(env_pairs.get("PKG_CONFIG_PATH")) {
         merged.insert("PKG_CONFIG_PATH".to_string(), path);

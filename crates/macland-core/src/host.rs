@@ -1,10 +1,13 @@
 use crate::adapter::AdapterManifest;
+use crate::runner::effective_env;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +59,7 @@ pub fn create_launch_request(
         mode,
         compositor_executable: Some(resolve_binary(source_root, binary).display().to_string()),
         compositor_arguments: args.to_vec(),
-        environment: manifest.env.clone(),
+        environment: effective_env(&manifest.env),
         permission_hints: vec!["accessibility".to_string(), "inputMonitoring".to_string()],
         working_directory: Some(source_root.display().to_string()),
         status_file: Some(status_path.display().to_string()),
@@ -80,24 +83,88 @@ pub fn launch_host(host_binary: &Path, artifacts: &HostLaunchArtifacts) -> Resul
         .map_err(|err| err.to_string())?;
 
     if status.success() {
-        let status_payload = fs::read_to_string(&artifacts.status_path).map_err(|_| {
+        let status_value = read_host_status(&artifacts.status_path)?.ok_or_else(|| {
             format!(
                 "host exited without writing status file {}",
                 artifacts.status_path.display()
             )
         })?;
-        let envelope: HostStatusEnvelope =
-            serde_json::from_str(&status_payload).map_err(|err| err.to_string())?;
-        if envelope.status == "host_started"
-            || envelope.status == "child_started"
-            || envelope.status == "child_exit:0"
-        {
+        if is_success_status(&status_value) {
             Ok(())
         } else {
-            Err(format!("host reported status {}", envelope.status))
+            Err(format!("host reported status {status_value}"))
         }
     } else {
         Err(format!("host exited with status {status}"))
+    }
+}
+
+pub fn smoke_launch_host(
+    host_binary: &Path,
+    artifacts: &HostLaunchArtifacts,
+    startup_timeout: Duration,
+    startup_grace: Duration,
+) -> Result<(), String> {
+    let mut child = Command::new(host_binary)
+        .args([
+            "--config",
+            artifacts.request_path.to_string_lossy().as_ref(),
+        ])
+        .spawn()
+        .map_err(|err| err.to_string())?;
+
+    let deadline = Instant::now() + startup_timeout;
+    loop {
+        if let Some(status_value) = read_host_status(&artifacts.status_path)? {
+            if status_value == "child_started" {
+                thread::sleep(startup_grace);
+                if let Some(updated_status) = read_host_status(&artifacts.status_path)? {
+                    if is_failure_status(&updated_status) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(format!("host reported status {updated_status}"));
+                    }
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(());
+            }
+
+            if is_failure_status(&status_value) {
+                let _ = child.wait();
+                return Err(format!("host reported status {status_value}"));
+            }
+        }
+
+        if let Some(exit_status) = child.try_wait().map_err(|err| err.to_string())? {
+            if exit_status.success() {
+                let status_value = read_host_status(&artifacts.status_path)?.ok_or_else(|| {
+                    format!(
+                        "host exited without writing status file {}",
+                        artifacts.status_path.display()
+                    )
+                })?;
+                if is_success_status(&status_value) {
+                    return Ok(());
+                }
+                return Err(format!("host reported status {status_value}"));
+            }
+
+            let status_message = read_host_status(&artifacts.status_path)?
+                .unwrap_or_else(|| format!("host exited with status {exit_status}"));
+            return Err(format!("host reported status {status_message}"));
+        }
+
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "host did not report child startup within {} ms",
+                startup_timeout.as_millis()
+            ));
+        }
+
+        thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -110,14 +177,43 @@ fn resolve_binary(source_root: &Path, binary: &str) -> PathBuf {
     }
 }
 
+fn read_host_status(status_path: &Path) -> Result<Option<String>, String> {
+    let Ok(status_payload) = fs::read_to_string(status_path) else {
+        return Ok(None);
+    };
+
+    if let Ok(envelope) = serde_json::from_str::<HostStatusEnvelope>(&status_payload) {
+        return Ok(Some(envelope.status));
+    }
+
+    let trimmed = status_payload
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string());
+    Ok(trimmed)
+}
+
+fn is_success_status(status: &str) -> bool {
+    status == "host_started" || status == "child_started" || status == "child_exit:0"
+}
+
+fn is_failure_status(status: &str) -> bool {
+    !(status == "host_started" || status == "child_started" || status == "child_exit:0")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host};
+    use super::{
+        HostLaunchArtifacts, HostSessionMode, create_launch_request, launch_host,
+        smoke_launch_host,
+    };
     use crate::adapter::{AdapterManifest, BuildSystem};
     use std::collections::BTreeMap;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
 
     #[test]
     fn creates_launch_request_file() {
@@ -193,6 +289,40 @@ mod tests {
         fs::write(&artifacts.request_path, "{}").unwrap();
         let err = launch_host(&host_binary, &artifacts).unwrap_err();
         assert!(err.contains("child_failed:test"));
+
+        fs::remove_dir_all(&temp).unwrap();
+    }
+
+    #[test]
+    fn smoke_launch_host_succeeds_after_child_starts() {
+        let temp =
+            std::env::temp_dir().join(format!("macland-host-launch-smoke-{}", std::process::id()));
+        if temp.exists() {
+            fs::remove_dir_all(&temp).unwrap();
+        }
+        fs::create_dir_all(&temp).unwrap();
+
+        let status_path = temp.join("status.json");
+        let host_binary = write_script(
+            &temp.join("host-child-started.sh"),
+            &format!(
+                "#!/bin/sh\ncat <<'EOF' > \"{}\"\n{{\"status\":\"child_started\"}}\nEOF\nsleep 30\n",
+                status_path.display()
+            ),
+        );
+        let artifacts = HostLaunchArtifacts {
+            request_path: temp.join("request.json"),
+            status_path: status_path.clone(),
+        };
+        fs::write(&artifacts.request_path, "{}").unwrap();
+
+        smoke_launch_host(
+            &host_binary,
+            &artifacts,
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+        )
+        .unwrap();
 
         fs::remove_dir_all(&temp).unwrap();
     }

@@ -147,9 +147,8 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
             return managedRuntimeDirectory
         }
 
-        let runtimeDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("macland-runtime", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let runtimeDirectory = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("macland-\(UUID().uuidString)", isDirectory: true)
         do {
             try FileManager.default.createDirectory(
                 at: runtimeDirectory,

@@ -3,7 +3,7 @@ use macland_core::bootstrap::{BootstrapPlan, execute_bootstrap};
 use macland_core::conformance::run_conformance;
 use macland_core::detect::autodetect_manifest;
 use macland_core::doctor::DoctorReport;
-use macland_core::host::{HostSessionMode, create_launch_request, launch_host};
+use macland_core::host::{HostSessionMode, create_launch_request, smoke_launch_host};
 use macland_core::repo::{RepoSpec, RepoWorkspace};
 use macland_core::report::{
     ActionRecord, SupportReport, SupportTier, load_action_record, write_action_record,
@@ -16,6 +16,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 fn main() {
     if let Err(err) = run(env::args().collect()) {
@@ -390,7 +391,12 @@ fn run_run_action(
     println!("mode: {:?}", mode);
 
     if execute {
-        launch_host(&host_binary, &artifacts)?;
+        smoke_launch_host(
+            &host_binary,
+            &artifacts,
+            Duration::from_secs(5),
+            Duration::from_millis(750),
+        )?;
         write_action_record(
             &workspace.artifacts_root(&spec).join("reports"),
             &ActionRecord {

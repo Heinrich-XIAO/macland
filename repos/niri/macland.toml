@@ -1,0 +1,15 @@
+id = "niri"
+repo = "https://github.com/YaLTeR/niri.git"
+rev = "main"
+build_system = "cargo"
+configure = ["cargo", "fetch"]
+build = ["cargo", "build", "--release", "--no-default-features"]
+test = ["cargo", "test", "--release", "--no-default-features"]
+entrypoint = ["cargo", "run", "--release", "--no-default-features", "--bin", "niri"]
+patch_policy = "prefer-none"
+sdk_features = ["metal-fast-path"]
+protocol_expectations = ["xdg-shell"]
+
+[env]
+DISPLAY = "macland"
+RUSTFLAGS = "-C debuginfo=0 -C link-arg=-Wl,-ld_classic"
