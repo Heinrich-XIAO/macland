@@ -4,12 +4,13 @@ rev = "main"
 build_system = "cargo"
 configure = ["cargo", "fetch"]
 build = ["cargo", "build", "--release", "--no-default-features"]
-test = ["cargo", "test", "--release", "--no-default-features"]
-entrypoint = ["cargo", "run", "--release", "--no-default-features", "--bin", "niri"]
+test = ["cargo", "test", "--release", "--all", "--exclude", "niri-visual-tests"]
+entrypoint = ["./target/release/niri"]
 patch_policy = "prefer-none"
 sdk_features = ["metal-fast-path"]
 protocol_expectations = ["xdg-shell"]
 
 [env]
 DISPLAY = "macland"
-RUSTFLAGS = "-C debuginfo=0 -C link-arg=-Wl,-ld_classic"
+MACLAND_HEADLESS = "1"
+RUSTFLAGS = "-C debuginfo=0 -C link-arg=-Wl,-ld_classic -C link-arg=-ludev"

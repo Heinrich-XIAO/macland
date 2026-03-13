@@ -147,23 +147,28 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
             return managedRuntimeDirectory
         }
 
-        let runtimeDirectory = URL(fileURLWithPath: "/tmp", isDirectory: true)
-            .appendingPathComponent("macland-\(UUID().uuidString)", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(
-                at: runtimeDirectory,
-                withIntermediateDirectories: true
-            )
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o700],
-                ofItemAtPath: runtimeDirectory.path
-            )
-            managedRuntimeDirectory = runtimeDirectory
-            return runtimeDirectory
-        } catch {
-            writeStatus("runtime_dir_failed:\(error.localizedDescription)")
-            return nil
+        for _ in 0..<16 {
+            let suffix = String(format: "%08x", UInt32.random(in: UInt32.min...UInt32.max))
+            let runtimeDirectory = URL(fileURLWithPath: "/tmp", isDirectory: true)
+                .appendingPathComponent("ml\(suffix)", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(
+                    at: runtimeDirectory,
+                    withIntermediateDirectories: false
+                )
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700],
+                    ofItemAtPath: runtimeDirectory.path
+                )
+                managedRuntimeDirectory = runtimeDirectory
+                return runtimeDirectory
+            } catch {
+                continue
+            }
         }
+
+        writeStatus("runtime_dir_failed:could_not_allocate_short_path")
+        return nil
     }
 }
 

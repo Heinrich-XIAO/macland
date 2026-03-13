@@ -1791,7 +1791,7 @@ Name: libdrm
 Description: macland compatibility shim for libdrm discovery
 Version: 2.4.999
 Cflags: -I${includedir}
-Libs:
+Libs: -L${libdir} -ldrm
 "#,
     ),
     (
@@ -1806,7 +1806,7 @@ Description: macland compatibility shim for GBM discovery
 Version: 25.0.0
 Requires: libdrm
 Cflags: -I${includedir}
-Libs:
+Libs: -L${libdir} -lgbm
 "#,
     ),
     (
@@ -1820,7 +1820,7 @@ Name: libinput
 Description: macland compatibility shim for libinput discovery
 Version: 1.28.99
 Cflags: -I${includedir}
-Libs:
+Libs: -L${libdir} -linput
 "#,
     ),
     (
@@ -1834,7 +1834,7 @@ Name: libudev
 Description: macland compatibility shim for libudev discovery
 Version: 255.99
 Cflags: -I${includedir}
-Libs:
+Libs: -L${libdir} -ludev
 "#,
     ),
     (
@@ -1848,7 +1848,7 @@ Name: libevdev
 Description: macland compatibility shim for libevdev discovery
 Version: 1.13.99
 Cflags: -I${includedir}
-Libs:
+Libs: -L${libdir} -levdev
 "#,
     ),
     (
@@ -2149,8 +2149,206 @@ void libseat_set_log_level(enum libseat_log_level level) {
     ),
 ];
 
+const GBM_STUB_SYMBOLS: &str = r#"
+gbm_bo_create
+gbm_bo_create_with_modifiers2
+gbm_bo_destroy
+gbm_bo_get_fd_for_plane
+gbm_bo_get_format
+gbm_bo_get_handle
+gbm_bo_get_handle_for_plane
+gbm_bo_get_height
+gbm_bo_get_modifier
+gbm_bo_get_offset
+gbm_bo_get_plane_count
+gbm_bo_get_stride
+gbm_bo_get_stride_for_plane
+gbm_bo_get_width
+gbm_bo_import
+gbm_bo_map
+gbm_bo_unmap
+gbm_bo_write
+gbm_create_device
+gbm_device_destroy
+gbm_device_get_fd
+"#;
+
+const LIBINPUT_STUB_SYMBOLS: &str = r#"
+libinput_device_config_accel_get_default_profile
+libinput_device_config_accel_set_profile
+libinput_device_config_accel_set_speed
+libinput_device_config_calibration_get_default_matrix
+libinput_device_config_calibration_set_matrix
+libinput_device_config_click_get_default_method
+libinput_device_config_click_set_method
+libinput_device_config_dwt_set_enabled
+libinput_device_config_dwtp_set_enabled
+libinput_device_config_left_handed_set
+libinput_device_config_middle_emulation_set_enabled
+libinput_device_config_scroll_get_default_method
+libinput_device_config_scroll_get_natural_scroll_enabled
+libinput_device_config_scroll_set_button
+libinput_device_config_scroll_set_button_lock
+libinput_device_config_scroll_set_method
+libinput_device_config_scroll_set_natural_scroll_enabled
+libinput_device_config_send_events_set_mode
+libinput_device_config_tap_get_default_button_map
+libinput_device_config_tap_get_default_drag_enabled
+libinput_device_config_tap_get_finger_count
+libinput_device_config_tap_set_button_map
+libinput_device_config_tap_set_drag_enabled
+libinput_device_config_tap_set_drag_lock_enabled
+libinput_device_config_tap_set_enabled
+libinput_device_get_id_product
+libinput_device_get_id_vendor
+libinput_device_get_name
+libinput_device_get_size
+libinput_device_get_sysname
+libinput_device_get_udev_device
+libinput_device_has_capability
+libinput_device_led_update
+libinput_device_ref
+libinput_device_unref
+libinput_dispatch
+libinput_event_destroy
+libinput_event_device_notify_get_base_event
+libinput_event_gesture_get_angle_delta
+libinput_event_gesture_get_base_event
+libinput_event_gesture_get_cancelled
+libinput_event_gesture_get_dx
+libinput_event_gesture_get_dx_unaccelerated
+libinput_event_gesture_get_dy
+libinput_event_gesture_get_dy_unaccelerated
+libinput_event_gesture_get_finger_count
+libinput_event_gesture_get_scale
+libinput_event_gesture_get_time_usec
+libinput_event_get_device
+libinput_event_get_device_notify_event
+libinput_event_get_gesture_event
+libinput_event_get_keyboard_event
+libinput_event_get_pointer_event
+libinput_event_get_switch_event
+libinput_event_get_tablet_pad_event
+libinput_event_get_tablet_tool_event
+libinput_event_get_touch_event
+libinput_event_get_type
+libinput_event_keyboard_get_base_event
+libinput_event_keyboard_get_key
+libinput_event_keyboard_get_key_state
+libinput_event_keyboard_get_time_usec
+libinput_event_pointer_get_absolute_x_transformed
+libinput_event_pointer_get_absolute_y_transformed
+libinput_event_pointer_get_base_event
+libinput_event_pointer_get_button
+libinput_event_pointer_get_button_state
+libinput_event_pointer_get_dx
+libinput_event_pointer_get_dx_unaccelerated
+libinput_event_pointer_get_dy
+libinput_event_pointer_get_dy_unaccelerated
+libinput_event_pointer_get_scroll_value
+libinput_event_pointer_get_scroll_value_v120
+libinput_event_pointer_get_time_usec
+libinput_event_pointer_has_axis
+libinput_event_switch_get_base_event
+libinput_event_switch_get_switch
+libinput_event_switch_get_switch_state
+libinput_event_tablet_pad_get_base_event
+libinput_event_tablet_tool_distance_has_changed
+libinput_event_tablet_tool_get_base_event
+libinput_event_tablet_tool_get_button
+libinput_event_tablet_tool_get_button_state
+libinput_event_tablet_tool_get_distance
+libinput_event_tablet_tool_get_pressure
+libinput_event_tablet_tool_get_proximity_state
+libinput_event_tablet_tool_get_rotation
+libinput_event_tablet_tool_get_slider_position
+libinput_event_tablet_tool_get_tilt_x
+libinput_event_tablet_tool_get_tilt_y
+libinput_event_tablet_tool_get_time_usec
+libinput_event_tablet_tool_get_tip_state
+libinput_event_tablet_tool_get_tool
+libinput_event_tablet_tool_get_wheel_delta
+libinput_event_tablet_tool_get_wheel_delta_discrete
+libinput_event_tablet_tool_get_x_transformed
+libinput_event_tablet_tool_get_y_transformed
+libinput_event_tablet_tool_pressure_has_changed
+libinput_event_tablet_tool_rotation_has_changed
+libinput_event_tablet_tool_slider_has_changed
+libinput_event_tablet_tool_tilt_x_has_changed
+libinput_event_tablet_tool_tilt_y_has_changed
+libinput_event_tablet_tool_wheel_has_changed
+libinput_event_touch_get_base_event
+libinput_event_touch_get_slot
+libinput_event_touch_get_time_usec
+libinput_event_touch_get_x_transformed
+libinput_event_touch_get_y_transformed
+libinput_get_event
+libinput_get_fd
+libinput_ref
+libinput_resume
+libinput_suspend
+libinput_tablet_tool_get_serial
+libinput_tablet_tool_get_tool_id
+libinput_tablet_tool_get_type
+libinput_tablet_tool_has_distance
+libinput_tablet_tool_has_pressure
+libinput_tablet_tool_has_rotation
+libinput_tablet_tool_has_slider
+libinput_tablet_tool_has_tilt
+libinput_tablet_tool_has_wheel
+libinput_tablet_tool_ref
+libinput_tablet_tool_unref
+libinput_udev_assign_seat
+libinput_udev_create_context
+libinput_unref
+"#;
+
+const LIBUDEV_STUB_SYMBOLS: &str = r#"
+udev_device_get_devnode
+udev_device_get_devnum
+udev_device_get_parent_with_subsystem_devtype
+udev_device_get_property_value
+udev_device_get_sysattr_value
+udev_device_get_syspath
+udev_device_get_udev
+udev_device_new_from_syspath
+udev_device_ref
+udev_device_unref
+udev_enumerate_add_match_subsystem
+udev_enumerate_add_match_sysname
+udev_enumerate_get_list_entry
+udev_enumerate_new
+udev_enumerate_scan_devices
+udev_enumerate_unref
+udev_list_entry_get_name
+udev_list_entry_get_next
+udev_monitor_enable_receiving
+udev_monitor_filter_add_match_subsystem_devtype
+udev_monitor_get_fd
+udev_monitor_new_from_netlink
+udev_monitor_receive_device
+udev_monitor_unref
+udev_new
+udev_ref
+udev_unref
+"#;
+
 pub const DEPENDENCIES: &[&str] = &[
     "libdrm", "gbm", "libinput", "libudev", "libseat", "libevdev",
+];
+
+const DYNAMIC_LIBRARY_ALIASES: &[(&str, &[&str])] = &[
+    (
+        "libEGL.so.1",
+        &["/opt/homebrew/lib/libEGL.dylib", "/opt/homebrew/opt/mesa/lib/libEGL.dylib"],
+    ),
+    (
+        "libGLESv2.so.2",
+        &[
+            "/opt/homebrew/lib/libGLESv2.dylib",
+            "/opt/homebrew/opt/mesa/lib/libGLESv2.dylib",
+        ],
+    ),
 ];
 
 pub fn install_workspace_shims(workspace_root: &Path) -> Result<PathBuf, String> {
@@ -2163,8 +2361,26 @@ pub fn install_workspace_shims(workspace_root: &Path) -> Result<PathBuf, String>
         fs::write(&path, contents).map_err(|err| err.to_string())?;
     }
     install_stub_libraries(&sysroot)?;
+    install_dynamic_library_aliases(&sysroot)?;
     patch_vendor_headers(&sysroot)?;
     Ok(sysroot)
+}
+
+fn generated_stub_source(library_name: &str) -> Option<String> {
+    match library_name {
+        "libgbm.a" => Some(generate_symbol_stubs(GBM_STUB_SYMBOLS)),
+        "libinput.a" => Some(generate_symbol_stubs(LIBINPUT_STUB_SYMBOLS)),
+        "libudev.a" => Some(generate_symbol_stubs(LIBUDEV_STUB_SYMBOLS)),
+        _ => None,
+    }
+}
+
+fn generate_symbol_stubs(symbols: &str) -> String {
+    let mut source = String::from("#include <stdint.h>\n\n");
+    for symbol in symbols.split_whitespace() {
+        source.push_str(&format!("uintptr_t {symbol}(void) {{ return 0; }}\n"));
+    }
+    source
 }
 
 fn patch_vendor_headers(sysroot: &Path) -> Result<(), String> {
@@ -2187,6 +2403,34 @@ fn patch_vendor_headers(sysroot: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn install_dynamic_library_aliases(sysroot: &Path) -> Result<(), String> {
+    let lib_directory = sysroot.join("lib");
+    fs::create_dir_all(&lib_directory).map_err(|err| err.to_string())?;
+
+    for (alias, candidates) in DYNAMIC_LIBRARY_ALIASES {
+        let alias_path = lib_directory.join(alias);
+        if alias_path.exists() {
+            continue;
+        }
+
+        let Some(source_path) = candidates.iter().map(PathBuf::from).find(|path| path.exists()) else {
+            continue;
+        };
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&source_path, &alias_path).map_err(|err| err.to_string())?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            fs::copy(&source_path, &alias_path).map_err(|err| err.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 fn install_stub_libraries(sysroot: &Path) -> Result<(), String> {
     let staging = sysroot.join(".stubs");
     fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
@@ -2200,7 +2444,9 @@ fn install_stub_libraries(sysroot: &Path) -> Result<(), String> {
         let object_path = staging.join(format!("{stem}.o"));
         let library_path = sysroot.join("lib").join(library_name);
 
-        fs::write(&source_path, source).map_err(|err| err.to_string())?;
+        let source_contents = generated_stub_source(library_name)
+            .unwrap_or_else(|| (*source).to_string());
+        fs::write(&source_path, source_contents).map_err(|err| err.to_string())?;
         let compile_status = Command::new("cc")
             .args([
                 "-c",
