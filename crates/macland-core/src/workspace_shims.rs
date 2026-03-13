@@ -558,7 +558,11 @@ static inline int drmModeDestroyDumbBuffer(int fd, uint32_t handle) {
 #include <string.h>
 
 #define DRM_DISPLAY_MODE_LEN 32
-#define DRM_MODE_CONTENT_TYPE_GRAPHICS 0
+#define DRM_MODE_CONTENT_TYPE_NO_DATA 0
+#define DRM_MODE_CONTENT_TYPE_GRAPHICS 1
+#define DRM_MODE_CONTENT_TYPE_PHOTO 2
+#define DRM_MODE_CONTENT_TYPE_CINEMA 3
+#define DRM_MODE_CONTENT_TYPE_GAME 4
 #define DRM_MODE_TYPE_USERDEF (1U << 5)
 #define DRM_MODE_FLAG_PHSYNC (1U << 0)
 #define DRM_MODE_FLAG_NHSYNC (1U << 1)
@@ -2239,6 +2243,8 @@ mod tests {
         assert!(xf86drmmode.contains("typedef struct _drmModeConnector"));
         assert!(xf86drmmode.contains("drmModeGetPlane"));
         assert!(xf86drmmode.contains("drmModeGetConnector"));
+        assert!(xf86drmmode.contains("#define DRM_MODE_CONTENT_TYPE_NO_DATA 0"));
+        assert!(xf86drmmode.contains("#define DRM_MODE_CONTENT_TYPE_GAME 4"));
         let input_codes =
             fs::read_to_string(sysroot.join("include/linux/input-event-codes.h")).unwrap();
         assert!(input_codes.contains("#define EV_KEY 0x01"));
