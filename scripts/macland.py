@@ -304,6 +304,8 @@ def run_action(workspace: Path, repo_id: str, action: str, execute: bool) -> Non
 
     env = workspace_command_env(workspace)
     env.update(manifest.env)
+    if "XDG_RUNTIME_DIR" not in env or not env["XDG_RUNTIME_DIR"]:
+        env["XDG_RUNTIME_DIR"] = str(ensure_runtime_dir(repo_root))
     if action == "build" and manifest.configure and manifest.build_system in {"meson", "cmake", "autotools"}:
         run_checked(manifest.configure, cwd=repo_root, env=env)
 
@@ -335,6 +337,9 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     source_root = source_dir(workspace, repo_id)
     env = workspace_command_env(workspace)
     env.update(manifest.env)
+    runtime_root = source_root if source_root.exists() else workspace
+    if "XDG_RUNTIME_DIR" not in env or not env["XDG_RUNTIME_DIR"]:
+        env["XDG_RUNTIME_DIR"] = str(ensure_runtime_dir(runtime_root))
     mode = "windowed-debug" if "--windowed-debug" in args else "fullscreen"
     print(f"repo: {manifest.repo_id}")
     print(f"mode: {mode}")
@@ -603,6 +608,10 @@ def workspace_command_env(workspace: Path) -> dict[str, str]:
     env["CPATH"] = ":".join([str(include_dir), env.get("CPATH", "")]).strip(":")
     env["PATH"] = ":".join([str(workspace / ".macland" / "tools" / "bin"), env.get("PATH", "")]).strip(":")
     return env
+
+
+def ensure_runtime_dir(root: Path) -> Path:
+    return Path(tempfile.mkdtemp(prefix="ml", dir="/tmp"))
 
 
 def run_checked(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:

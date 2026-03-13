@@ -2,8 +2,12 @@ use crate::adapter::{AdapterManifest, BuildSystem};
 use crate::report::{ActionRecord, SupportReport, SupportTier, write_action_record};
 use std::collections::BTreeMap;
 use std::env;
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandPlan {
@@ -75,7 +79,14 @@ pub fn execute_command_line(
 
     let mut process = Command::new(binary);
     process.args(args).current_dir(cwd);
-    for (key, value) in effective_env(env_pairs) {
+    let mut environment = effective_env(env_pairs);
+    if !environment.contains_key("XDG_RUNTIME_DIR") {
+        environment.insert(
+            "XDG_RUNTIME_DIR".to_string(),
+            ensure_runtime_dir(cwd)?.display().to_string(),
+        );
+    }
+    for (key, value) in environment {
         process.env(key, value);
     }
 
@@ -90,6 +101,36 @@ pub fn execute_command_line(
             status
         ))
     }
+}
+
+fn ensure_runtime_dir(cwd: &Path) -> Result<PathBuf, String> {
+    let mut seed = cwd.display().to_string().bytes().fold(0u32, |acc, byte| {
+        acc.wrapping_mul(16777619) ^ u32::from(byte)
+    }) ^ std::process::id()
+        ^ SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| err.to_string())?
+            .subsec_nanos();
+    for _ in 0..32 {
+        let runtime_dir = PathBuf::from("/tmp").join(format!("ml{seed:08x}"));
+        match fs::create_dir(&runtime_dir) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    let mut permissions = fs::metadata(&runtime_dir)
+                        .map_err(|err| err.to_string())?
+                        .permissions();
+                    permissions.set_mode(0o700);
+                    fs::set_permissions(&runtime_dir, permissions).map_err(|err| err.to_string())?;
+                }
+                return Ok(runtime_dir);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(err) => return Err(err.to_string()),
+        }
+        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+    }
+    Err("failed to allocate short runtime directory".to_string())
 }
 
 pub fn effective_env(env_pairs: &BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -385,7 +426,7 @@ pub fn execute_recorded_command_line(
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandPlan, execute_command_line, inspect_manifest, merged_include_path,
+        CommandPlan, ensure_runtime_dir, execute_command_line, inspect_manifest, merged_include_path,
         merged_library_path, merged_linker_flags, merged_path_env, merged_pkg_config_path,
         merged_prefix_path,
     };
@@ -420,6 +461,17 @@ mod tests {
     fn executes_simple_command() {
         let cwd = std::env::current_dir().unwrap();
         execute_command_line(&cwd, &["/usr/bin/true".to_string()], &BTreeMap::new()).unwrap();
+    }
+
+    #[test]
+    fn creates_managed_runtime_dir() {
+        let cwd = std::env::temp_dir().join(format!(
+            "macland-runtime-test-{}",
+            std::process::id()
+        ));
+        let runtime_dir = ensure_runtime_dir(&cwd).unwrap();
+        assert!(runtime_dir.starts_with("/tmp/ml"));
+        assert!(runtime_dir.exists());
     }
 
     #[test]
