@@ -412,10 +412,10 @@ fn run_run_action(
         .load_repo_spec(repo_id)
         .unwrap_or_else(|_| RepoSpec::new(repo_id, "", None));
     let source_root = workspace.source_root(&spec);
-    let mode = if args.iter().any(|arg| arg == "--windowed-debug") {
-        HostSessionMode::WindowedDebug
-    } else {
+    let mode = if args.iter().any(|arg| arg == "--fullscreen") {
         HostSessionMode::Fullscreen
+    } else {
+        HostSessionMode::WindowedDebug
     };
     let artifacts = create_launch_request(
         &manifest,

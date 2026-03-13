@@ -348,7 +348,7 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     execute = "--execute" in args
     manifest = load_manifest(workspace, repo_id)
     source_root = source_dir(workspace, repo_id)
-    mode = "windowed-debug" if "--windowed-debug" in args else "fullscreen"
+    mode = "fullscreen" if "--fullscreen" in args else "windowed-debug"
     print(f"repo: {manifest.repo_id}")
     print(f"mode: {mode}")
     print("command: " + " ".join(manifest.entrypoint))
