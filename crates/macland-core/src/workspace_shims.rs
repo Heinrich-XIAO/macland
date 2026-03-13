@@ -876,7 +876,9 @@ struct libinput_device {
     const char* name;
 };
 struct libinput_device_group;
-struct libinput_config_accel;
+struct libinput_config_accel {
+    int profile;
+};
 
 enum libinput_config_status {
     LIBINPUT_CONFIG_STATUS_SUCCESS = 0,
@@ -1227,17 +1229,21 @@ static inline enum libinput_config_status libinput_device_config_accel_set_speed
     return LIBINPUT_CONFIG_STATUS_SUCCESS;
 }
 
-static inline struct libinput_config_accel* libinput_config_accel_create(enum libinput_accel_type type) {
-    (void)type;
-    return (struct libinput_config_accel*)0;
+static inline struct libinput_config_accel* libinput_config_accel_create(
+        enum libinput_config_accel_profile profile) {
+    static struct libinput_config_accel accel;
+    accel.profile = profile;
+    return &accel;
 }
 
 static inline enum libinput_config_status libinput_config_accel_set_points(
-        struct libinput_config_accel* accel, size_t count, const double* x, const double* y) {
+        struct libinput_config_accel* accel, enum libinput_accel_type type, double step,
+        size_t count, const double* points) {
     (void)accel;
+    (void)type;
+    (void)step;
     (void)count;
-    (void)x;
-    (void)y;
+    (void)points;
     return LIBINPUT_CONFIG_STATUS_SUCCESS;
 }
 
@@ -2160,6 +2166,12 @@ mod tests {
         let input_codes =
             fs::read_to_string(sysroot.join("include/linux/input-event-codes.h")).unwrap();
         assert!(input_codes.contains("#define EV_KEY 0x01"));
+        let libinput = fs::read_to_string(sysroot.join("include/libinput.h")).unwrap();
+        assert!(libinput.contains("LIBINPUT_CONFIG_ACCEL_PROFILE_CUSTOM = 3"));
+        assert!(libinput.contains(
+            "libinput_config_accel_create(\n        enum libinput_config_accel_profile profile)"
+        ));
+        assert!(libinput.contains("enum libinput_accel_type type, double step"));
         let rt_stub = fs::read_to_string(sysroot.join(".stubs/rt.c")).unwrap();
         assert!(rt_stub.contains("int eventfd("));
         assert!(rt_stub.contains("int signalfd("));
