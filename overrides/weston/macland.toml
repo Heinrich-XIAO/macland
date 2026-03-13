@@ -1,0 +1,14 @@
+id = "weston"
+repo = "https://gitlab.freedesktop.org/wayland/weston.git"
+rev = "main"
+build_system = "meson"
+configure = ["meson", "setup", "build", "--reconfigure", "-Dbackend-default=headless", "-Dbackend-drm=false", "-Dbackend-wayland=false", "-Dbackend-x11=false", "-Dbackend-rdp=false", "-Dbackend-vnc=false", "-Dbackend-pipewire=false", "-Drenderer-vulkan=false", "-Dxwayland=false", "-Dsystemd=false", "-Dremoting=false", "-Dpipewire=false", "-Dshell-lua=false", "-Dtests=false", "-Ddemo-clients=false", "-Dtools=[]", "-Dsimple-clients=[]", "-Dshell-desktop=false", "-Dshell-ivi=false"]
+build = ["ninja", "-C", "build", "frontend/weston", "kiosk-shell/kiosk-shell.dylib", "libweston/backend-headless/headless-backend.dylib", "libweston/renderer-gl/gl-renderer.dylib"]
+test = ["meson", "test", "-C", "build"]
+entrypoint = ["./build/frontend/weston", "--backend=headless", "--shell=kiosk-shell.so"]
+patch_policy = "compatibility-lane"
+sdk_features = ["metal-fast-path"]
+protocol_expectations = ["xdg-shell"]
+
+[env]
+WESTON_MODULE_MAP = "headless-backend.so=build/libweston/backend-headless/headless-backend.dylib;kiosk-shell.so=build/kiosk-shell/kiosk-shell.dylib;gl-renderer.so=build/libweston/renderer-gl/gl-renderer.dylib"

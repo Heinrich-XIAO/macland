@@ -237,19 +237,23 @@ fn merged_compile_flags(override_value: Option<&String>) -> Option<String> {
 }
 
 fn merged_linker_flags(override_value: Option<&String>) -> Option<String> {
+    let mut candidates = vec![
+        "-L.macland/sysroot/lib",
+        "-L/opt/homebrew/lib",
+        "-L/opt/homebrew/opt/epoll-shim/lib",
+        "-L/opt/homebrew/opt/jpeg/lib",
+        "-L/opt/homebrew/opt/libxkbcommon/lib",
+        "-L/opt/homebrew/opt/mesa/lib",
+        "-L/usr/local/lib",
+    ];
+    if resolve_candidate_path(".macland/sysroot/lib/librt.a").is_some() {
+        candidates.insert(0, "-lrt");
+    }
+
     merge_flag_list(
         env::var_os("LDFLAGS"),
         override_value,
-        &[
-            "-lrt",
-            "-L.macland/sysroot/lib",
-            "-L/opt/homebrew/lib",
-            "-L/opt/homebrew/opt/epoll-shim/lib",
-            "-L/opt/homebrew/opt/jpeg/lib",
-            "-L/opt/homebrew/opt/libxkbcommon/lib",
-            "-L/opt/homebrew/opt/mesa/lib",
-            "-L/usr/local/lib",
-        ],
+        &candidates,
     )
 }
 

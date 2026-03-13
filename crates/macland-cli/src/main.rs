@@ -120,8 +120,13 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
             fs::create_dir_all(&repo_root).map_err(|err| err.to_string())?;
             fs::create_dir_all(&source_root).map_err(|err| err.to_string())?;
             workspace.write_repo_spec(&spec)?;
-            let manifest_path =
-                workspace.write_manifest(&spec, &RepoWorkspace::adapter_template(&spec))?;
+            let manifest_path = if let Some(path) =
+                workspace.seed_manifest_from_override(&spec, false)?
+            {
+                path
+            } else {
+                workspace.write_manifest(&spec, &RepoWorkspace::adapter_template(&spec))?
+            };
             println!("registered repo: {}", spec.id);
             println!("repo root: {}", repo_root.display());
             println!("source root: {}", source_root.display());
@@ -151,8 +156,15 @@ fn handle_repo(workspace: &RepoWorkspace, args: &[String]) -> Result<(), String>
                 }
             }
             sync_git_submodules(&source_root)?;
+            let applied_patches = workspace.apply_override_patches(&spec)?;
             ensure_wlroots_subproject(&source_root)?;
             maybe_autodetect_manifest(workspace, &spec, &source_root)?;
+            if let Some(path) = workspace.seed_manifest_from_override(&spec, true)? {
+                println!("seeded adapter override: {}", path.display());
+            }
+            for patch in applied_patches {
+                println!("applied override patch: {}", patch.display());
+            }
             println!("synced repo: {repo_id}");
             Ok(())
         }

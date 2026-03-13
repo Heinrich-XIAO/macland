@@ -1,0 +1,173 @@
+diff --git a/libweston/compositor.c b/libweston/compositor.c
+index b1bd4e8e..f4bda05d 100644
+--- a/libweston/compositor.c
++++ b/libweston/compositor.c
+@@ -55,6 +55,14 @@
+ #include <inttypes.h>
+ #include <drm_fourcc.h>
+ 
++#if defined(__APPLE__) && !defined(MACLAND_HAVE_ITIMERSPEC)
++#define MACLAND_HAVE_ITIMERSPEC 1
++struct itimerspec {
++	struct timespec it_interval;
++	struct timespec it_value;
++};
++#endif
++
+ #include "timeline.h"
+ #include "weston-trace.h"
+ 
+diff --git a/libweston/meson.build b/libweston/meson.build
+index 7c2fc126..3d9dffe1 100644
+--- a/libweston/meson.build
++++ b/libweston/meson.build
+@@ -104,6 +104,16 @@ if dep_gbm.found()
+ 	config_h.set('HAVE_GBM', '1')
+ endif
+ 
++if host_machine.system() == 'darwin'
++	dep_epoll_shim = dependency('epoll-shim', required: false)
++	if not dep_epoll_shim.found()
++		dep_epoll_shim = cc.find_library('epoll-shim', required: false)
++	endif
++	if dep_epoll_shim.found()
++		deps_libweston += dep_epoll_shim
++	endif
++endif
++
+ if get_option('backend-vnc')
+ 	dep_pam = dependency('pam', required: false)
+ 	if not dep_pam.found()
+@@ -209,25 +219,29 @@ if get_option('backend-drm')
+ 	dep_session_helper = declare_dependency(link_with: lib_session_helper)
+ endif
+ 
+-lib_libinput_backend = static_library(
+-	'libinput-backend',
+-	[
+-		'libinput-device.c',
+-		'libinput-seat.c',
+-		tablet_unstable_v2_server_protocol_h
+-	],
+-	dependencies: [
+-		dep_libweston_private,
+-		dep_libinput,
+-		dependency('libudev', version: '>= 136')
+-	],
+-	include_directories: common_inc,
+-	install: false
+-)
+-dep_libinput_backend = declare_dependency(
+-	link_with: lib_libinput_backend,
+-	include_directories: include_directories('.')
+-)
++if get_option('backend-drm')
++	lib_libinput_backend = static_library(
++		'libinput-backend',
++		[
++			'libinput-device.c',
++			'libinput-seat.c',
++			tablet_unstable_v2_server_protocol_h
++		],
++		dependencies: [
++			dep_libweston_private,
++			dep_libinput,
++			dependency('libudev', version: '>= 136')
++		],
++		include_directories: common_inc,
++		install: false
++	)
++	dep_libinput_backend = declare_dependency(
++		link_with: lib_libinput_backend,
++		include_directories: include_directories('.')
++	)
++else
++	dep_libinput_backend = declare_dependency()
++endif
+ 
+ dep_vertex_clipping = declare_dependency(
+ 	sources: 'vertex-clipping.c',
+diff --git a/libweston/weston-log.c b/libweston/weston-log.c
+index 4cf5374a..613c0432 100644
+--- a/libweston/weston-log.c
++++ b/libweston/weston-log.c
+@@ -596,6 +596,17 @@ input_stream_close(void *cookie)
+ 	return 0;
+ }
+ 
++#if defined(__APPLE__)
++static int
++input_stream_write_apple(void *cookie, const char *buf, int size)
++{
++	if (size < 0)
++		return -1;
++
++	return (int) input_stream_write(cookie, buf, (size_t) size);
++}
++#endif
++
+ /** Register a new stream name, creating a log scope.
+  *
+  * @param log_ctx The weston_log_context where to add.
+@@ -653,10 +664,12 @@ weston_log_ctx_add_log_scope(struct weston_log_context *log_ctx,
+ {
+ 	struct weston_log_scope *scope;
+ 	struct weston_log_subscription *pending_sub = NULL;
++#if !defined(__APPLE__)
+ 	const cookie_io_functions_t input_stream_io_funcs = {
+ 		.write = input_stream_write,
+ 		.close = input_stream_close,
+ 	};
++#endif
+ 
+ 	if (!name || !description) {
+ 		fprintf(stderr, "Error: cannot add a debug scope without name or description.\n");
+@@ -689,7 +702,12 @@ weston_log_ctx_add_log_scope(struct weston_log_context *log_ctx,
+ 	scope->user_data = user_data;
+ 	wl_list_init(&scope->subscription_list);
+ 
++#if defined(__APPLE__)
++	scope->input_stream = funopen(scope, NULL, input_stream_write_apple, NULL,
++				      input_stream_close);
++#else
+ 	scope->input_stream = fopencookie(scope, "w", input_stream_io_funcs);
++#endif
+ 
+ 	if (!scope->name || !scope->desc || !scope->input_stream) {
+ 		fprintf(stderr, "Error adding debug scope '%s': out of memory or cookie.\n",
+diff --git a/shared/meson.build b/shared/meson.build
+index eb2f30de..30b58aac 100644
+--- a/shared/meson.build
++++ b/shared/meson.build
+@@ -8,6 +8,16 @@ srcs_libshared = [
+ ]
+ deps_libshared = [dep_wayland_client, dep_pixman, deps_for_libweston_users, dep_egl, dep_vulkan]
+ 
++if host_machine.system() == 'darwin'
++	dep_epoll_shim = dependency('epoll-shim', required: false)
++	if not dep_epoll_shim.found()
++		dep_epoll_shim = cc.find_library('epoll-shim', required: false)
++	endif
++	if dep_epoll_shim.found()
++		deps_libshared += dep_epoll_shim
++	endif
++endif
++
+ lib_libshared = static_library(
+ 	'shared',
+ 	srcs_libshared,
+diff --git a/shared/xalloc.h b/shared/xalloc.h
+index a2747f9c..464e9ace 100644
+--- a/shared/xalloc.h
++++ b/shared/xalloc.h
+@@ -36,6 +36,10 @@ extern "C" {
+ #include <unistd.h>
+ #include <string.h>
+ 
++#if defined(__APPLE__) && !defined(program_invocation_short_name)
++#define program_invocation_short_name getprogname()
++#endif
++
+ static inline void *
+ abort_oom_if_null(void *p)
+ {
