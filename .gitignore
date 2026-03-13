@@ -5,3 +5,5 @@ artifacts
 repos
 .macland
 .DS_Store
+__pycache__/
+*.pyc
