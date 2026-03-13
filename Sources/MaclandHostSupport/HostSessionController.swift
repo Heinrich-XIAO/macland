@@ -14,7 +14,10 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        let frame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = configuration.mode == .fullscreen
+            ? (NSScreen.main?.frame ?? screenFrame)
+            : centeredDebugFrame(in: screenFrame)
         let styleMask: NSWindow.StyleMask = configuration.mode == .fullscreen ? [.borderless] : [.titled, .closable, .resizable, .miniaturizable]
         let window = NSWindow(
             contentRect: frame,
@@ -169,6 +172,14 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
         writeStatus("runtime_dir_failed:could_not_allocate_short_path")
         return nil
+    }
+
+    private func centeredDebugFrame(in screenFrame: NSRect) -> NSRect {
+        let width = min(max(screenFrame.width * 0.72, 960), 1280)
+        let height = min(max(screenFrame.height * 0.72, 640), 820)
+        let originX = screenFrame.origin.x + (screenFrame.width - width) / 2
+        let originY = screenFrame.origin.y + (screenFrame.height - height) / 2
+        return NSRect(x: originX, y: originY, width: width, height: height)
     }
 }
 
