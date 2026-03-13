@@ -14,6 +14,9 @@ public enum HostArgumentParser {
         var workingDirectory: String?
         var statusFile: String?
         var autoExitAfterChild = false
+        var captureImagePath: String?
+        var captureDelayMillis: Int?
+        var autoExitAfterCapture = false
 
         var iterator = arguments.dropFirst().makeIterator()
         while let arg = iterator.next() {
@@ -40,6 +43,14 @@ public enum HostArgumentParser {
                 statusFile = iterator.next()
             case "--auto-exit-after-child":
                 autoExitAfterChild = true
+            case "--capture-image":
+                captureImagePath = iterator.next()
+            case "--capture-delay-ms":
+                if let value = iterator.next(), let parsed = Int(value) {
+                    captureDelayMillis = parsed
+                }
+            case "--auto-exit-after-capture":
+                autoExitAfterCapture = true
             default:
                 continue
             }
@@ -52,7 +63,10 @@ public enum HostArgumentParser {
             environment: env,
             workingDirectory: workingDirectory,
             statusFile: statusFile,
-            autoExitAfterChild: autoExitAfterChild
+            autoExitAfterChild: autoExitAfterChild,
+            captureImagePath: captureImagePath,
+            captureDelayMillis: captureDelayMillis,
+            autoExitAfterCapture: autoExitAfterCapture
         )
     }
 

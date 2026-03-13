@@ -14,6 +14,9 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
     public var workingDirectory: String?
     public var statusFile: String?
     public var autoExitAfterChild: Bool
+    public var captureImagePath: String?
+    public var captureDelayMillis: Int?
+    public var autoExitAfterCapture: Bool
 
     public init(
         mode: SessionMode,
@@ -23,7 +26,10 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
         permissionHints: [PermissionKind] = PermissionKind.requiredDefaults,
         workingDirectory: String? = nil,
         statusFile: String? = nil,
-        autoExitAfterChild: Bool = false
+        autoExitAfterChild: Bool = false,
+        captureImagePath: String? = nil,
+        captureDelayMillis: Int? = nil,
+        autoExitAfterCapture: Bool = false
     ) {
         self.mode = mode
         self.compositorExecutable = compositorExecutable
@@ -33,6 +39,9 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
         self.workingDirectory = workingDirectory
         self.statusFile = statusFile
         self.autoExitAfterChild = autoExitAfterChild
+        self.captureImagePath = captureImagePath
+        self.captureDelayMillis = captureDelayMillis
+        self.autoExitAfterCapture = autoExitAfterCapture
     }
 }
 

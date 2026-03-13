@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MetalKit
+import CoreGraphics
 
 @MainActor
 public final class HostSessionController: NSObject, NSApplicationDelegate {
@@ -15,6 +16,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        writeStatus("host_booted")
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let frame = configuration.mode == .fullscreen
             ? (NSScreen.main?.frame ?? screenFrame)
@@ -60,6 +62,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         applyPresentationMode()
         launchCompositorIfNeeded()
+        scheduleImageCaptureIfNeeded()
 
         if configuration.mode == .fullscreen {
             window.toggleFullScreen(nil)
@@ -263,6 +266,49 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     private func updateStatusLabel(_ text: String) {
         statusLabel?.stringValue = text
+    }
+
+    private func scheduleImageCaptureIfNeeded() {
+        guard let captureImagePath = configuration.captureImagePath else {
+            return
+        }
+
+        let delayMillis = max(configuration.captureDelayMillis ?? 1200, 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMillis)) { [weak self] in
+            self?.captureWindowImage(to: captureImagePath)
+        }
+    }
+
+    private func captureWindowImage(to path: String) {
+        guard let window, let contentView = window.contentView else {
+            updateStatusLabel("Image capture failed: missing window")
+            return
+        }
+
+        let bounds = contentView.bounds
+        guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: bounds) else {
+            updateStatusLabel("Image capture failed: no bitmap")
+            return
+        }
+
+        contentView.cacheDisplay(in: bounds, to: bitmap)
+        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            updateStatusLabel("Image capture failed: PNG encode")
+            return
+        }
+
+        do {
+            try pngData.write(to: URL(fileURLWithPath: path), options: .atomic)
+            updateStatusLabel("Captured image to \(URL(fileURLWithPath: path).lastPathComponent)")
+            if configuration.autoExitAfterCapture {
+                if let compositorProcess, compositorProcess.isRunning {
+                    compositorProcess.terminate()
+                }
+                NSApp.terminate(nil)
+            }
+        } catch {
+            updateStatusLabel("Image capture failed: \(error.localizedDescription)")
+        }
     }
 }
 

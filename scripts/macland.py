@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -349,17 +350,23 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     manifest = load_manifest(workspace, repo_id)
     source_root = source_dir(workspace, repo_id)
     mode = "fullscreen" if "--fullscreen" in args else "windowed-debug"
+    image_path = image_path_arg(workspace, args)
     print(f"repo: {manifest.repo_id}")
     print(f"mode: {mode}")
     print("command: " + " ".join(manifest.entrypoint))
+    if image_path is not None:
+        print(f"image: {image_path}")
     if not execute:
         return
 
     if not manifest.entrypoint:
         raise CliError("manifest entrypoint is empty")
     run_root = source_root if source_root.exists() else workspace
-    artifacts = create_host_launch_request(workspace, manifest, run_root, mode)
-    launch_host(workspace, artifacts)
+    artifacts = create_host_launch_request(workspace, manifest, run_root, mode, image_path)
+    if image_path is None:
+        launch_host(workspace, artifacts)
+    else:
+        launch_host_and_capture_image(workspace, artifacts, image_path)
     write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
 
 
@@ -703,6 +710,7 @@ def create_host_launch_request(
     manifest: Manifest,
     run_root: Path,
     mode: str,
+    image_path: Path | None,
 ) -> HostLaunchArtifacts:
     binary, *arguments = manifest.entrypoint
     artifacts_root = artifacts_dir(workspace, manifest.repo_id) / "run"
@@ -730,6 +738,11 @@ def create_host_launch_request(
         "statusFile": str(status_path),
         "autoExitAfterChild": True,
     }
+    if image_path is not None:
+        request["captureImagePath"] = str(image_path)
+        request["captureDelayMillis"] = 1400
+        request["autoExitAfterCapture"] = True
+        request["autoExitAfterChild"] = False
     request_path.write_text(json.dumps(request, indent=2))
     return HostLaunchArtifacts(request_path=request_path, status_path=status_path, runtime_dir=runtime_dir)
 
@@ -746,6 +759,56 @@ def launch_host(workspace: Path, artifacts: HostLaunchArtifacts) -> None:
     run_checked(command, cwd=workspace)
 
 
+def launch_host_and_capture_image(workspace: Path, artifacts: HostLaunchArtifacts, image_path: Path) -> None:
+    command = host_launch_command(workspace, artifacts.request_path)
+    process = subprocess.Popen(command, cwd=workspace)
+    try:
+        wait_for_host_status(artifacts.status_path, {"child_started", "host_started"}, timeout_seconds=8)
+        time.sleep(1.5)
+        screenshot_path = image_path.resolve()
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        screenshot = subprocess.run(["screencapture", "-x", str(screenshot_path)], cwd=workspace)
+        if screenshot.returncode != 0:
+            raise CliError(f"image capture failed with status {screenshot.returncode}")
+    finally:
+        terminate_process(process)
+
+
+def wait_for_host_status(status_path: Path, success_values: set[str], timeout_seconds: float) -> str:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        status = read_host_status(status_path)
+        if status in success_values:
+            return status
+        if status and status.startswith(("child_failed:", "runtime_dir_failed:", "child_exit:")):
+            raise CliError(f"host reported status {status}")
+        time.sleep(0.05)
+    raise CliError(f"host did not report startup within {timeout_seconds:.1f} seconds")
+
+
+def read_host_status(status_path: Path) -> str | None:
+    if not status_path.exists():
+        return None
+    try:
+        payload = json.loads(status_path.read_text())
+    except json.JSONDecodeError:
+        lines = [line.strip() for line in status_path.read_text().splitlines() if line.strip()]
+        return lines[-1] if lines else None
+    status = payload.get("status")
+    return str(status) if status is not None else None
+
+
+def terminate_process(process: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
     candidates = [
         workspace / ".build" / "debug" / "macland-host",
@@ -755,6 +818,15 @@ def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
         if candidate.exists():
             return [str(candidate), "--config", str(request_path)]
     return ["/usr/bin/swift", "run", "macland-host", "--config", str(request_path)]
+
+
+def image_path_arg(workspace: Path, args: list[str]) -> Path | None:
+    if "--image" not in args:
+        return None
+    index = args.index("--image")
+    if index + 1 < len(args) and not args[index + 1].startswith("--"):
+        return Path(args[index + 1]).resolve()
+    return (workspace / "output.png").resolve()
 
 
 def run_checked(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
@@ -802,7 +874,7 @@ def print_help() -> None:
     print("  inspect <repo-id>")
     print("  build <repo-id> [--execute]")
     print("  test <repo-id> [--upstream] [--conformance] [--execute]")
-    print("  run <repo-id> [--fullscreen|--windowed-debug] [--execute]")
+    print("  run <repo-id> [--fullscreen|--windowed-debug] [--image [path]] [--execute]")
 
 
 if __name__ == "__main__":

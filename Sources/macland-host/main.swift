@@ -7,5 +7,6 @@ let application = NSApplication.shared
 let delegate = HostSessionController(configuration: configuration)
 application.setActivationPolicy(.regular)
 application.delegate = delegate
-application.run()
-
+withExtendedLifetime(delegate) {
+    application.run()
+}
