@@ -2035,6 +2035,20 @@ int macland_librt_stub(void) {
 "#,
     ),
     (
+        "libgbm.a",
+        r#"int macland_libgbm_stub(void) {
+    return 0;
+}
+"#,
+    ),
+    (
+        "libdrm.a",
+        r#"int macland_libdrm_stub(void) {
+    return 0;
+}
+"#,
+    ),
+    (
         "libseat.a",
         r#"#include <errno.h>
 #include <stdlib.h>
@@ -2256,6 +2270,8 @@ mod tests {
         assert!(sysroot.join("lib/libinput.a").exists());
         assert!(sysroot.join("lib/libudev.a").exists());
         assert!(sysroot.join("lib/libevdev.a").exists());
+        assert!(sysroot.join("lib/libgbm.a").exists());
+        assert!(sysroot.join("lib/libdrm.a").exists());
         assert!(sysroot.join("lib/libseat.a").exists());
         let xf86drm = fs::read_to_string(sysroot.join("include/xf86drm.h")).unwrap();
         assert!(xf86drm.contains("drmGetVersion"));
