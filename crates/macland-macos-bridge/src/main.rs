@@ -129,6 +129,12 @@ impl BridgeState {
             let new_windows = get_macos_windows();
             let enum_time = start.elapsed();
             eprintln!("macland-macos-bridge: enum: {:?}", enum_time);
+            eprintln!(
+                "macland-macos-bridge: enum result count: cached_before={} new={} wayland_before={}",
+                self.cached_windows.len(),
+                new_windows.len(),
+                self.windows.len()
+            );
             self.cached_windows = new_windows;
             self.last_enum = std::time::Instant::now();
             self.last_window_count = self.cached_windows.len();
@@ -151,8 +157,17 @@ impl BridgeState {
         for (pid, mac_window) in &self.cached_windows {
             if !self.windows.contains_key(pid) {
                 eprintln!(
-                    "macland-macos-bridge: creating Wayland window for {} (PID:{})",
-                    mac_window.name, pid
+                    "macland-macos-bridge: creating Wayland window: key={} mac_pid={} mac_window_id={} title={:?} mac_bounds={}x{}+{}+{} initial_wayland={}x{} configured=false",
+                    pid,
+                    mac_window._pid,
+                    mac_window.window_id,
+                    mac_window.name,
+                    mac_window.width,
+                    mac_window.height,
+                    mac_window.x,
+                    mac_window.y,
+                    800,
+                    600
                 );
                 let surface = self.compositor.create_surface(qh, ());
                 let xdg_surface = self.xdg_wm_base.get_xdg_surface(&surface, qh, ());
@@ -175,8 +190,10 @@ impl BridgeState {
                     },
                 );
                 eprintln!(
-                    "macland-macos-bridge: created Wayland window for PID:{}",
-                    pid
+                    "macland-macos-bridge: created Wayland window: key={} surface_committed=true min_size=400x300 stored_wayland={}x{} configured=false",
+                    pid,
+                    800,
+                    600
                 );
             }
         }
@@ -188,25 +205,64 @@ impl BridgeState {
             let _capture_start = std::time::Instant::now();
             for (pid, wayland_window) in &mut self.windows {
                 if !wayland_window.configured {
+                    eprintln!(
+                        "macland-macos-bridge: skipping capture: key={} reason=not-configured wayland={}x{}",
+                        pid, wayland_window.width, wayland_window.height
+                    );
                     continue;
                 }
                 // Use Wayland window size for capture
                 if wayland_window.width < 100 || wayland_window.height < 100 {
+                    eprintln!(
+                        "macland-macos-bridge: skipping capture: key={} reason=too-small wayland={}x{}",
+                        pid, wayland_window.width, wayland_window.height
+                    );
                     continue;
                 }
                 // Get macOS window for capture
                 if let Some(mac_window) = mac_windows.get(pid) {
+                    eprintln!(
+                        "macland-macos-bridge: capture request: key={} mac_pid={} mac_window_id={} mac_bounds={}x{}+{}+{} target_wayland={}x{} configured={}",
+                        pid,
+                        mac_window._pid,
+                        mac_window.window_id,
+                        mac_window.width,
+                        mac_window.height,
+                        mac_window.x,
+                        mac_window.y,
+                        wayland_window.width,
+                        wayland_window.height,
+                        wayland_window.configured
+                    );
                     if let Some(frame) = capture_window(
                         mac_window.window_id,
                         wayland_window.width,
                         wayland_window.height,
                     ) {
+                        eprintln!(
+                            "macland-macos-bridge: capture success queued: key={} frame={}x{}",
+                            pid, frame.width, frame.height
+                        );
                         result.push((*pid, frame));
+                    } else {
+                        eprintln!(
+                            "macland-macos-bridge: capture returned none: key={} mac_window_id={}",
+                            pid, mac_window.window_id
+                        );
                     }
+                } else {
+                    eprintln!(
+                        "macland-macos-bridge: no cached mac window for wayland key={}",
+                        pid
+                    );
                 }
             }
             let capture_time = capture_start.elapsed();
-            eprintln!("macland-macos-bridge: capture: {:?}", capture_time);
+            eprintln!(
+                "macland-macos-bridge: capture loop complete: {:?} queued_updates={}",
+                capture_time,
+                result.len()
+            );
             result
         };
 
@@ -232,10 +288,22 @@ impl BridgeState {
         let stride = frame.width as i32 * 4;
         let size = (stride as usize) * (frame.height as usize);
         eprintln!(
-            "macland-macos-bridge: update: win {}x{} frame {}x{}",
-            window.width, window.height, frame.width, frame.height
+            "macland-macos-bridge: update begin: key={} wayland={}x{} frame={}x{} stride={} bytes={}",
+            pid,
+            window.width,
+            window.height,
+            frame.width,
+            frame.height,
+            stride,
+            size
         );
         if frame.pixels.len() != size {
+            eprintln!(
+                "macland-macos-bridge: update size mismatch: key={} expected={} actual={}",
+                pid,
+                size,
+                frame.pixels.len()
+            );
             return Err("size mismatch".to_string());
         }
 
@@ -265,6 +333,14 @@ impl BridgeState {
         window.surface.attach(Some(&buffer), 0, 0);
         window.surface.commit();
         window.buffer = Some(buffer);
+        eprintln!(
+            "macland-macos-bridge: update committed: key={} attached_buffer={}x{} stored_wayland={}x{}",
+            pid,
+            frame.width,
+            frame.height,
+            window.width,
+            window.height
+        );
         Ok(())
     }
 }
@@ -320,8 +396,10 @@ end tell"#;
         if out.status.success() {
             let output_str = String::from_utf8_lossy(&out.stdout);
             for (i, line) in output_str.lines().enumerate() {
+                eprintln!("macland-macos-bridge: enum raw line {}: {:?}", i, line);
                 // Parse: pid|name|x|y|width|height
                 let parts: Vec<&str> = line.split('|').collect();
+                eprintln!("macland-macos-bridge: enum parsed parts {}: {:?}", i, parts);
                 if parts.len() >= 6 {
                     if let (Ok(pid), Ok(x), Ok(y), Ok(width), Ok(height)) = (
                         parts[0].parse::<u32>(),
@@ -336,6 +414,10 @@ end tell"#;
                                 pid, name, width, height, x, y);
                             // Use unique ID for each window
                             let window_id = pid * 1000 + i as u32;
+                            eprintln!(
+                                "macland-macos-bridge: enum synthetic key={} from pid={} index={}",
+                                window_id, pid, i
+                            );
                             windows.insert(
                                 window_id,
                                 MacWindow {
@@ -374,6 +456,10 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
     use std::process::Command;
 
     if width < 10 || height < 10 {
+        eprintln!(
+            "macland-macos-bridge: capture abort: window_id={} requested={}x{} too small",
+            window_id, width, height
+        );
         return None;
     }
 
@@ -525,8 +611,22 @@ impl Dispatch<XdgSurface, ()> for BridgeState {
         if let xdg_surface::Event::Configure { serial } = event {
             for w in _state.windows.values_mut() {
                 if w.xdg_surface == *surface {
+                    eprintln!(
+                        "macland-macos-bridge: xdg_surface configure: serial={} old_configured={} current_wayland={}x{}",
+                        serial,
+                        w.configured,
+                        w.width,
+                        w.height
+                    );
                     w.xdg_surface.ack_configure(serial);
                     w.configured = true;
+                    eprintln!(
+                        "macland-macos-bridge: xdg_surface configured: serial={} new_configured={} current_wayland={}x{}",
+                        serial,
+                        w.configured,
+                        w.width,
+                        w.height
+                    );
                 }
             }
         }
@@ -548,8 +648,13 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
                         let new_width = width as u32;
                         let new_height = height as u32;
                         eprintln!(
-                            "macland-macos-bridge: configure: {}x{} (was {}x{})",
-                            new_width, new_height, w.width, w.height
+                            "macland-macos-bridge: xdg_toplevel configure: key={} new={}x{} old={}x{} configured={}",
+                            pid,
+                            new_width,
+                            new_height,
+                            w.width,
+                            w.height,
+                            w.configured
                         );
                         // Resize the macOS window to match
                         resize_macos_window(*pid, new_width, new_height);
@@ -557,6 +662,12 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
                         w.height = new_height;
                         // Commit to apply the new size
                         w.surface.commit();
+                        eprintln!(
+                            "macland-macos-bridge: xdg_toplevel configure applied: key={} stored_wayland={}x{} surface_commit=true",
+                            pid,
+                            w.width,
+                            w.height
+                        );
                     }
                 }
             }
@@ -567,6 +678,10 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
                     .find(|(_, w)| w.xdg_toplevel == *toplevel)
                     .map(|(p, _)| *p)
                 {
+                    eprintln!(
+                        "macland-macos-bridge: xdg_toplevel close: key={} removing_window=true",
+                        pid
+                    );
                     _state.windows.remove(&pid);
                 }
             }
