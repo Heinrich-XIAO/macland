@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,6 +76,15 @@ class HostLaunchArtifacts:
     request_path: Path
     status_path: Path
     runtime_dir: Path
+
+
+@dataclass
+class ImageCaptureArtifacts:
+    runtime_dir: Path
+    report_path: Path
+    image_path: Path
+    stdout_path: Path
+    stderr_path: Path
 
 
 def main(argv: list[str]) -> int:
@@ -361,6 +371,10 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     if not manifest.entrypoint:
         raise CliError("manifest entrypoint is empty")
     run_root = source_root if source_root.exists() else workspace
+    if image_path is not None:
+        capture_compositor_image(workspace, manifest, run_root, image_path)
+        write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
+        return
     artifacts = create_host_launch_request(workspace, manifest, run_root, mode, image_path)
     launch_host(workspace, artifacts)
     write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
@@ -736,11 +750,38 @@ def create_host_launch_request(
     }
     if image_path is not None:
         request["captureImagePath"] = str(image_path)
-        request["captureDelayMillis"] = 1400
+        request["captureDelayMillis"] = 2200
         request["autoExitAfterCapture"] = True
         request["autoExitAfterChild"] = False
     request_path.write_text(json.dumps(request, indent=2))
     return HostLaunchArtifacts(request_path=request_path, status_path=status_path, runtime_dir=runtime_dir)
+
+
+def create_image_capture_artifacts(workspace: Path, repo_id: str, image_path: Path) -> ImageCaptureArtifacts:
+    artifacts_root = artifacts_dir(workspace, repo_id) / "run"
+    artifacts_root.mkdir(parents=True, exist_ok=True)
+    runtime_dir = artifacts_root / "runtime"
+    report_path = artifacts_root / "reference-client-report.json"
+    stdout_path = artifacts_root / "compositor.stdout.log"
+    stderr_path = artifacts_root / "compositor.stderr.log"
+    if runtime_dir.exists():
+        shutil.rmtree(runtime_dir)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(runtime_dir, 0o700)
+    if report_path.exists():
+        report_path.unlink()
+    if image_path.exists():
+        image_path.unlink()
+    for log_path in [stdout_path, stderr_path]:
+        if log_path.exists():
+            log_path.unlink()
+    return ImageCaptureArtifacts(
+        runtime_dir=runtime_dir,
+        report_path=report_path,
+        image_path=image_path,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
 
 
 def resolve_binary(run_root: Path, binary: str) -> Path:
@@ -755,6 +796,137 @@ def launch_host(workspace: Path, artifacts: HostLaunchArtifacts) -> None:
     run_checked(command, cwd=workspace)
 
 
+def capture_compositor_image(workspace: Path, manifest: Manifest, run_root: Path, image_path: Path) -> None:
+    artifacts = create_image_capture_artifacts(workspace, manifest.repo_id, image_path)
+    binary, *arguments = manifest.entrypoint
+    command = [str(resolve_binary(run_root, binary)), *arguments]
+    env = workspace_command_env(workspace)
+    env.update(manifest.env)
+    env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
+    stdout_handle = artifacts.stdout_path.open("w")
+    stderr_handle = artifacts.stderr_path.open("w")
+    process = subprocess.Popen(command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle)
+    try:
+        socket_name = wait_for_wayland_socket(artifacts.runtime_dir, timeout_seconds=8.0)
+        if socket_name is None:
+            if process.poll() is not None:
+                raise CliError(render_compositor_failure(command, process.returncode, artifacts))
+            raise CliError("timed out waiting for compositor Wayland socket")
+        time.sleep(0.35)
+        run_reference_client_capture(workspace, artifacts, socket_name)
+        if not artifacts.image_path.exists():
+            raise CliError(f"image capture did not produce {artifacts.image_path}")
+    except KeyboardInterrupt as exc:
+        terminate_process(process)
+        raise CliInterrupted() from exc
+    finally:
+        if process.poll() is None:
+            terminate_process(process)
+        stdout_handle.close()
+        stderr_handle.close()
+
+
+def render_compositor_failure(command: list[str], return_code: int | None, artifacts: ImageCaptureArtifacts) -> str:
+    parts = [f"compositor exited with status {return_code}: {' '.join(command)}"]
+    for label, path in [("stdout", artifacts.stdout_path), ("stderr", artifacts.stderr_path)]:
+        if path.exists():
+            content = path.read_text(errors="ignore").strip()
+            if content:
+                parts.append(f"{label}:\n{content[-4000:]}")
+    return "\n\n".join(parts)
+
+
+def run_reference_client_capture(
+    workspace: Path,
+    artifacts: ImageCaptureArtifacts,
+    socket_name: str,
+) -> None:
+    env = os.environ.copy()
+    env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
+    env["WAYLAND_DISPLAY"] = socket_name
+    commands = []
+    reference_client = prepare_launchable_reference_client(workspace)
+    commands.append(
+        [
+            str(reference_client),
+            "--report-file",
+            str(artifacts.report_path),
+            "--screenshot-file",
+            str(artifacts.image_path),
+        ]
+    )
+    commands.append(
+        [
+            "cargo",
+            "run",
+            "-p",
+            "macland-reference-client",
+            "--offline",
+            "--",
+            "--report-file",
+            str(artifacts.report_path),
+            "--screenshot-file",
+            str(artifacts.image_path),
+        ]
+    )
+
+    failures: list[str] = []
+    for command in commands:
+        try:
+            run_checked(command, cwd=workspace, env=env, timeout_seconds=12)
+            return
+        except CliError as err:
+            failures.append(str(err))
+
+    raise CliError("\n".join(failures))
+
+
+def prepare_launchable_reference_client(workspace: Path) -> Path:
+    run_checked(["cargo", "build", "-p", "macland-reference-client", "--offline"], cwd=workspace)
+    source_binary = workspace / "target" / "debug" / "macland-reference-client"
+    if not source_binary.exists():
+        raise CliError(f"missing built reference client at {source_binary}")
+    launch_root = workspace / ".macland" / "bin"
+    launch_root.mkdir(parents=True, exist_ok=True)
+    launchable_binary = launch_root / "macland-reference-client"
+    if launchable_binary.exists():
+        return launchable_binary
+    donor = find_trusted_executable_donor(workspace)
+    if donor is None:
+        return source_binary
+    install_binary_on_donor_inode(launchable_binary, source_binary, donor)
+    return launchable_binary
+
+
+def find_trusted_executable_donor(workspace: Path) -> Path | None:
+    patterns = [
+        "repos/*/source/subprojects/*/build-sysroot/meson-private/sanitycheck*.exe",
+        "repos/*/source/build-sysroot/meson-private/sanitycheck*.exe",
+        "repos/*/source/build/meson-private/sanitycheck*.exe",
+        "repos/*/source/subprojects/*/build/meson-private/sanitycheck*.exe",
+        ".macland/src/*/build/meson-private/sanitycheck*.exe",
+    ]
+    for pattern in patterns:
+        matches = sorted(workspace.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
+def install_binary_on_donor_inode(destination: Path, source_binary: Path, donor: Path) -> None:
+    payload = source_binary.read_bytes()
+    mode = source_binary.stat().st_mode & 0o777
+    if destination.exists():
+        destination.unlink()
+    donor.replace(destination)
+    with destination.open("r+b") as handle:
+        handle.seek(0)
+        handle.truncate(0)
+        handle.write(payload)
+    os.chmod(destination, mode)
+
+
+
 def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
     candidates = [
         workspace / ".build" / "debug" / "macland-host",
@@ -766,6 +938,31 @@ def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
     return ["/usr/bin/swift", "run", "macland-host", "--config", str(request_path)]
 
 
+def wait_for_wayland_socket(runtime_dir: Path, timeout_seconds: float) -> str | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if runtime_dir.exists():
+            sockets = sorted(path for path in runtime_dir.rglob("*") if path.exists() and path.is_socket())
+            for socket in sockets:
+                if socket.name.startswith("wayland-"):
+                    return socket.name
+            if sockets:
+                return sockets[0].name
+        time.sleep(0.05)
+    return None
+
+
+def terminate_process(process: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def image_path_arg(workspace: Path, args: list[str]) -> Path | None:
     if "--image" not in args:
         return None
@@ -775,12 +972,17 @@ def image_path_arg(workspace: Path, args: list[str]) -> Path | None:
     return (workspace / "output.png").resolve()
 
 
-def run_checked(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
+def run_checked(
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    timeout_seconds: float | None = None,
+) -> None:
     if not command:
         raise CliError("empty command")
     process = subprocess.Popen(command, cwd=cwd, env=env)
     try:
-        return_code = process.wait()
+        return_code = process.wait(timeout=timeout_seconds)
     except KeyboardInterrupt as exc:
         try:
             process.terminate()
@@ -789,6 +991,16 @@ def run_checked(command: list[str], cwd: Path, env: dict[str, str] | None = None
             process.kill()
             process.wait()
         raise CliInterrupted() from exc
+    except subprocess.TimeoutExpired as exc:
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise CliError(
+            f"command timed out after {timeout_seconds}s: {' '.join(command)}"
+        ) from exc
     if return_code != 0:
         raise CliError(f"command failed with status {return_code}: {' '.join(command)}")
 
