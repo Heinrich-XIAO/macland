@@ -824,6 +824,7 @@ def capture_compositor_image(workspace: Path, manifest: Manifest, run_root: Path
             terminate_process(process)
         stdout_handle.close()
         stderr_handle.close()
+        sanitize_capture_logs(artifacts)
 
 
 def render_compositor_failure(command: list[str], return_code: int | None, artifacts: ImageCaptureArtifacts) -> str:
@@ -836,6 +837,19 @@ def render_compositor_failure(command: list[str], return_code: int | None, artif
     return "\n\n".join(parts)
 
 
+def sanitize_capture_logs(artifacts: ImageCaptureArtifacts) -> None:
+    if not artifacts.stderr_path.exists():
+        return
+    benign_lines = {
+        "failed to read client connection (pid 0)",
+    }
+    lines = artifacts.stderr_path.read_text(errors="ignore").splitlines()
+    kept = [line for line in lines if line.strip() not in benign_lines]
+    if kept == lines:
+        return
+    artifacts.stderr_path.write_text("\n".join(kept) + ("\n" if kept else ""))
+
+
 def run_reference_client_capture(
     workspace: Path,
     artifacts: ImageCaptureArtifacts,
@@ -844,86 +858,17 @@ def run_reference_client_capture(
     env = os.environ.copy()
     env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
     env["WAYLAND_DISPLAY"] = socket_name
-    commands = []
-    reference_client = prepare_launchable_reference_client(workspace)
-    commands.append(
+    run_checked(
         [
-            str(reference_client),
-            "--report-file",
-            str(artifacts.report_path),
-            "--screenshot-file",
+            sys.executable,
+            str(workspace / "scripts" / "wayland_capture.py"),
             str(artifacts.image_path),
-        ]
-    )
-    commands.append(
-        [
-            "cargo",
-            "run",
-            "-p",
-            "macland-reference-client",
-            "--offline",
-            "--",
-            "--report-file",
             str(artifacts.report_path),
-            "--screenshot-file",
-            str(artifacts.image_path),
-        ]
+        ],
+        cwd=workspace,
+        env=env,
+        timeout_seconds=20,
     )
-
-    failures: list[str] = []
-    for command in commands:
-        try:
-            run_checked(command, cwd=workspace, env=env, timeout_seconds=12)
-            return
-        except CliError as err:
-            failures.append(str(err))
-
-    raise CliError("\n".join(failures))
-
-
-def prepare_launchable_reference_client(workspace: Path) -> Path:
-    run_checked(["cargo", "build", "-p", "macland-reference-client", "--offline"], cwd=workspace)
-    source_binary = workspace / "target" / "debug" / "macland-reference-client"
-    if not source_binary.exists():
-        raise CliError(f"missing built reference client at {source_binary}")
-    launch_root = workspace / ".macland" / "bin"
-    launch_root.mkdir(parents=True, exist_ok=True)
-    launchable_binary = launch_root / "macland-reference-client"
-    if launchable_binary.exists():
-        return launchable_binary
-    donor = find_trusted_executable_donor(workspace)
-    if donor is None:
-        return source_binary
-    install_binary_on_donor_inode(launchable_binary, source_binary, donor)
-    return launchable_binary
-
-
-def find_trusted_executable_donor(workspace: Path) -> Path | None:
-    patterns = [
-        "repos/*/source/subprojects/*/build-sysroot/meson-private/sanitycheck*.exe",
-        "repos/*/source/build-sysroot/meson-private/sanitycheck*.exe",
-        "repos/*/source/build/meson-private/sanitycheck*.exe",
-        "repos/*/source/subprojects/*/build/meson-private/sanitycheck*.exe",
-        ".macland/src/*/build/meson-private/sanitycheck*.exe",
-    ]
-    for pattern in patterns:
-        matches = sorted(workspace.glob(pattern))
-        if matches:
-            return matches[0]
-    return None
-
-
-def install_binary_on_donor_inode(destination: Path, source_binary: Path, donor: Path) -> None:
-    payload = source_binary.read_bytes()
-    mode = source_binary.stat().st_mode & 0o777
-    if destination.exists():
-        destination.unlink()
-    donor.replace(destination)
-    with destination.open("r+b") as handle:
-        handle.seek(0)
-        handle.truncate(0)
-        handle.write(payload)
-    os.chmod(destination, mode)
 
 
 
