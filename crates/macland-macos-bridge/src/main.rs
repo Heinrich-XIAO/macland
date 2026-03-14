@@ -147,6 +147,7 @@ impl BridgeState {
             self.windows.remove(&pid);
         }
 
+        // Create windows for found processes
         for (pid, mac_window) in &self.cached_windows {
             if !self.windows.contains_key(pid) {
                 eprintln!(
@@ -156,10 +157,10 @@ impl BridgeState {
                 let surface = self.compositor.create_surface(qh, ());
                 let xdg_surface = self.xdg_wm_base.get_xdg_surface(&surface, qh, ());
                 let xdg_toplevel = xdg_surface.get_toplevel(qh, ());
-                xdg_toplevel.set_title(format!("{} (PID:{})", mac_window.name, pid));
+                xdg_toplevel.set_title(format!("macOS Bridge - {} (PID:{})", mac_window.name, pid));
                 xdg_toplevel.set_app_id("com.macland.bridge".to_string());
-                // Start with minimum size to force compositor to set actual size
-                xdg_toplevel.set_min_size(100, 100);
+                // Set a reasonable default size
+                xdg_toplevel.set_min_size(400, 300);
                 surface.commit();
                 self.windows.insert(
                     *pid,
@@ -168,8 +169,8 @@ impl BridgeState {
                         xdg_surface,
                         xdg_toplevel,
                         buffer: None,
-                        width: 100,
-                        height: 100,
+                        width: 800,
+                        height: 600,
                         configured: false,
                     },
                 );
@@ -195,12 +196,11 @@ impl BridgeState {
                 }
                 // Get macOS window for capture
                 if let Some(mac_window) = mac_windows.get(pid) {
-                    if let Some(frame) = capture_window(
-                        mac_window.x,
-                        mac_window.y,
-                        mac_window.width,
-                        mac_window.height,
-                    ) {
+                    // For now, capture a fixed area since we can't get exact bounds
+                    // TODO: Find a better way to capture individual windows
+                    if let Some(frame) =
+                        capture_window(0, 0, wayland_window.width, wayland_window.height)
+                    {
                         result.push((*pid, frame));
                     }
                 }
@@ -289,51 +289,52 @@ fn resize_macos_window(pid: u32, width: u32, height: u32) {
 #[cfg(target_os = "macos")]
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
-    let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nset pos to position of wnd\nset winId to id of wnd\nset end of w to {pidVal, pName, winId, item 1 of pos, item 2 of pos, item 1 of sz, item 2 of sz}\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
-        .output();
+
+    // Try a simpler approach using ps to get running processes
+    let output = Command::new("ps").args(["-eo", "pid,comm"]).output();
+
     let mut windows = HashMap::new();
     if let Ok(out) = output {
         if out.status.success() {
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let parts: Vec<&str> = line.split(", ").collect();
-                if parts.len() >= 7 {
-                    if let (Ok(pid), Ok(window_id), Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                        parts[0].parse(),
-                        parts[2].parse(),
-                        parts[3].parse(),
-                        parts[4].parse(),
-                        parts[5].parse(),
-                        parts[6].parse(),
-                    ) {
-                        eprintln!("macland-macos-bridge: found window: pid={}, name={}, win_id={}, bounds={}x{}+{}+{}",
-                            pid, parts[1], window_id, width, height, x, y);
-                        windows.insert(
-                            pid,
-                            MacWindow {
-                                _pid: pid,
-                                name: parts[1].to_string(),
-                                window_id,
-                                x,
-                                y,
-                                width,
-                                height,
-                            },
-                        );
+            let output_str = String::from_utf8_lossy(&out.stdout);
+            for line in output_str.lines().skip(1) {
+                // Skip header
+                let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(pid) = parts[0].parse::<u32>() {
+                        let name = parts[1].to_string();
+                        // Skip system processes and our own process
+                        if !name.contains("kernel")
+                            && !name.contains("launchd")
+                            && !name.contains("macland")
+                            && !name.starts_with('[')
+                            && name.len() > 3
+                        {
+                            eprintln!(
+                                "macland-macos-bridge: found process: pid={}, name={}",
+                                pid, name
+                            );
+                            windows.insert(
+                                pid,
+                                MacWindow {
+                                    _pid: pid,
+                                    name: name.clone(),
+                                    window_id: pid, // Use PID as placeholder
+                                    x: 0,
+                                    y: 0,
+                                    width: 800, // Default size
+                                    height: 600,
+                                },
+                            );
+                        }
                     }
                 }
             }
-        } else {
-            eprintln!(
-                "macland-macos-bridge: osascript failed: {:?}",
-                String::from_utf8_lossy(&out.stderr)
-            );
         }
-    } else {
-        eprintln!("macland-macos-bridge: osascript command failed");
     }
+
     eprintln!(
-        "macland-macos-bridge: total windows found: {}",
+        "macland-macos-bridge: total processes found: {}",
         windows.len()
     );
     windows
@@ -344,23 +345,14 @@ fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame
     use std::process::Command;
 
     if width < 10 || height < 10 {
-        eprintln!(
-            "macland-macos-bridge: skipping window too small: {}x{}",
-            width, height
-        );
         return None;
     }
 
     let capture_start = std::time::Instant::now();
 
-    // Use rectangle capture instead of window ID - much faster!
+    // For demo: capture full screen, then we'll crop to window size later
     let output = Command::new("screencapture")
-        .args([
-            "-x",
-            "-R",
-            &format!("{},{},{},{}", x, y, width, height),
-            "/tmp/macland_capture.png",
-        ])
+        .args(["-x", "/tmp/macland_capture.png"])
         .output();
 
     let screencapture_time = capture_start.elapsed();
@@ -383,21 +375,24 @@ fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame
             }
         };
         let rgba = img.to_rgba8();
-        let (w, h) = rgba.dimensions();
+        let (full_w, full_h) = rgba.dimensions();
+
+        // Crop to requested size (or full size if smaller)
+        let crop_w = std::cmp::min(width, full_w);
+        let crop_h = std::cmp::min(height, full_h);
+
+        let cropped = image::imageops::crop_imm(&rgba, 0, 0, crop_w, crop_h).to_image();
+
         let load_time = load_start.elapsed();
 
-        eprintln!(
-            "macland-macos-bridge: capture: screencapture={:?}, load={:?}, size={}x{}",
-            screencapture_time, load_time, w, h
-        );
+        eprintln!("macland-macos-bridge: capture: screencapture={:?}, load={:?}, full={}x{}, cropped={}x{}",
+            screencapture_time, load_time, full_w, full_h, crop_w, crop_h);
 
-        if w > 0 && h > 0 {
-            return Some(WindowFrame {
-                width: w,
-                height: h,
-                pixels: rgba.into_raw(),
-            });
-        }
+        return Some(WindowFrame {
+            width: crop_w,
+            height: crop_h,
+            pixels: cropped.into_raw(),
+        });
     } else {
         eprintln!(
             "macland-macos-bridge: screencapture command failed: {:?}",
