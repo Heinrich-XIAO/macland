@@ -72,12 +72,10 @@ fn run() -> Result<(), String> {
 }
 
 struct MacWindow {
-    pid: u32,
+    _pid: u32,
     name: String,
     x: i32,
     y: i32,
-    width: u32,
-    height: u32,
 }
 
 struct WaylandWindow {
@@ -232,23 +230,17 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
         if out.status.success() {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 let parts: Vec<&str> = line.split(", ").collect();
-                if parts.len() >= 6 {
-                    if let (Ok(pid), Ok(x), Ok(y), Ok(w), Ok(h)) = (
-                        parts[0].parse(),
-                        parts[2].parse(),
-                        parts[3].parse(),
-                        parts[4].parse(),
-                        parts[5].parse(),
-                    ) {
+                if parts.len() >= 4 {
+                    if let (Ok(pid), Ok(x), Ok(y)) =
+                        (parts[0].parse(), parts[2].parse(), parts[3].parse())
+                    {
                         windows.insert(
                             pid,
                             MacWindow {
-                                pid,
+                                _pid: pid,
                                 name: parts[1].to_string(),
                                 x,
                                 y,
-                                width: w,
-                                height: h,
                             },
                         );
                     }
