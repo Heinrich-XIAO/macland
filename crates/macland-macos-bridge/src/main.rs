@@ -131,11 +131,6 @@ impl BridgeState {
             self.last_window_count = self.cached_windows.len();
         }
 
-        // Skip every other frame for performance
-        if self.frame_count % 2 != 0 {
-            return;
-        }
-
         let capture_start = std::time::Instant::now();
 
         for pid in self
@@ -228,6 +223,13 @@ impl BridgeState {
         if frame.pixels.len() != size {
             return Err("size mismatch".to_string());
         }
+
+        // Debug: print first pixel going to compositor
+        eprintln!(
+            "macland-macos-bridge: shm first pixel: {:02x?}",
+            &frame.pixels[..4]
+        );
+
         let mut backing = create_shm_file(size)?;
         backing
             .write_all(&frame.pixels)
@@ -315,6 +317,14 @@ fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame
             let img = image::open("/tmp/macland_capture.png").unwrap();
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
+
+            // Debug: print first few pixels as RGBA
+            let first: Vec<u8> = rgba.pixels().next().unwrap().0.to_vec();
+            eprintln!(
+                "macland-macos-bridge: image first pixel RGBA: {:02x?}",
+                first
+            );
+
             if w > 0 && h > 0 {
                 return Some(WindowFrame {
                     width: w,
