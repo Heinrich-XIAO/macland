@@ -13,6 +13,7 @@ public enum HostArgumentParser {
         var env: [String: String] = [:]
         var workingDirectory: String?
         var statusFile: String?
+        var previewLogFile: String?
         var autoExitAfterChild = false
         var captureImagePath: String?
         var captureDelayMillis: Int?
@@ -41,6 +42,8 @@ public enum HostArgumentParser {
                 workingDirectory = iterator.next()
             case "--status-file":
                 statusFile = iterator.next()
+            case "--preview-log-file":
+                previewLogFile = iterator.next()
             case "--auto-exit-after-child":
                 autoExitAfterChild = true
             case "--capture-image":
@@ -63,6 +66,7 @@ public enum HostArgumentParser {
             environment: env,
             workingDirectory: workingDirectory,
             statusFile: statusFile,
+            previewLogFile: previewLogFile,
             autoExitAfterChild: autoExitAfterChild,
             captureImagePath: captureImagePath,
             captureDelayMillis: captureDelayMillis,

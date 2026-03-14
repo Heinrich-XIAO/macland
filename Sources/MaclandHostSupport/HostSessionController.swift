@@ -18,9 +18,12 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     public init(configuration: HostLaunchConfiguration) {
         self.configuration = configuration
+        super.init()
+        appendPreviewLog(event: "controller_init")
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        appendPreviewLog(event: "application_did_finish_launching")
         writeStatus("host_booted")
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let frame = configuration.mode == .fullscreen
@@ -61,6 +64,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         window.contentView = contentView
 
         self.window = window
+        appendPreviewLog(event: "window_created")
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         applyPresentationMode()
@@ -77,6 +81,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        appendPreviewLog(event: "application_will_terminate")
         captureTimer?.invalidate()
         compositorProcess?.terminate()
         if let liveCaptureImageURL {
@@ -91,6 +96,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     }
 
     private func applyPresentationMode() {
+        appendPreviewLog(event: "apply_presentation_mode", details: ["mode": configuration.mode.rawValue])
         guard configuration.mode == .fullscreen else {
             NSApp.presentationOptions = []
             return
@@ -109,6 +115,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         guard let executable = configuration.compositorExecutable else {
             updateStatusLabel("Host ready")
             writeStatus("host_started")
+            appendPreviewLog(event: "host_started_without_compositor")
             return
         }
 
@@ -156,14 +163,23 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
         do {
             updateStatusLabel("Launching compositor…")
+            appendPreviewLog(
+                event: "launching_compositor",
+                details: [
+                    "executable": executable,
+                    "workingDirectory": process.currentDirectoryURL?.path ?? ""
+                ]
+            )
             try process.run()
             compositorProcess = process
             updateStatusLabel("Compositor running")
             writeStatus("child_started")
+            appendPreviewLog(event: "compositor_running")
             startLivePreviewIfPossible()
         } catch {
             updateStatusLabel("Launch failed: \(error.localizedDescription)")
             writeStatus("child_failed:\(error.localizedDescription)")
+            appendPreviewLog(event: "compositor_launch_failed", details: ["error": error.localizedDescription])
             if configuration.autoExitAfterChild {
                 Task { @MainActor in
                     NSApp.terminate(nil)
@@ -173,6 +189,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     }
 
     private func writeStatus(_ status: String) {
+        appendPreviewLog(event: "status", details: ["value": status])
         guard let statusFile = configuration.statusFile else {
             return
         }
@@ -490,10 +507,12 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     private func startLivePreviewIfPossible() {
         guard configuration.captureImagePath == nil else {
+            appendPreviewLog(event: "live_preview_skipped_capture_mode")
             return
         }
         guard let runtimePath = compositorRuntimeDirectoryPath() else {
             updateStatusLabel("Preview waiting for runtime dir")
+            appendPreviewLog(event: "live_preview_waiting_for_runtime_dir")
             return
         }
 
@@ -501,6 +520,14 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         let tempDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         liveCaptureImageURL = tempDirectory.appendingPathComponent("macland-live-\(token).png")
         liveCaptureReportURL = tempDirectory.appendingPathComponent("macland-live-\(token).json")
+        appendPreviewLog(
+            event: "live_preview_started",
+            details: [
+                "runtimePath": runtimePath,
+                "imagePath": liveCaptureImageURL?.path ?? "",
+                "reportPath": liveCaptureReportURL?.path ?? ""
+            ]
+        )
 
         captureTimer?.invalidate()
         captureTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
@@ -524,19 +551,30 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
             return
         }
         guard let liveCaptureImageURL, let liveCaptureReportURL else {
+            appendPreviewLog(event: "live_preview_missing_capture_paths")
             return
         }
         guard let socketName = discoverWaylandSocket(in: runtimePath) else {
             updateStatusLabel("Waiting for Wayland socket…")
+            appendPreviewLog(event: "live_preview_waiting_for_socket", details: ["runtimePath": runtimePath])
             return
         }
         guard let python = resolvePythonExecutable(),
               let script = resolveCaptureScript() else {
             updateStatusLabel("Live preview unavailable: missing capture runtime")
+            appendPreviewLog(event: "live_preview_missing_runtime")
             return
         }
 
         captureInFlight = true
+        appendPreviewLog(
+            event: "live_preview_capture_begin",
+            details: [
+                "socketName": socketName,
+                "python": python,
+                "script": script
+            ]
+        )
         let process = Process()
         process.executableURL = URL(fileURLWithPath: python)
         process.arguments = [
@@ -557,8 +595,14 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.captureInFlight = false
+                self.appendPreviewLog(
+                    event: "live_preview_capture_end",
+                    details: ["terminationStatus": "\(process.terminationStatus)"]
+                )
                 if process.terminationStatus == 0 {
                     self.loadLiveFrame(from: liveCaptureImageURL)
+                } else {
+                    self.updateStatusLabel("Live preview capture failed (\(process.terminationStatus))")
                 }
             }
         }
@@ -568,17 +612,20 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         } catch {
             captureInFlight = false
             updateStatusLabel("Live preview failed: \(error.localizedDescription)")
+            appendPreviewLog(event: "live_preview_capture_failed_to_start", details: ["error": error.localizedDescription])
         }
     }
 
     private func loadLiveFrame(from url: URL) {
         guard let image = NSImage(contentsOf: url) else {
+            appendPreviewLog(event: "live_preview_image_load_failed", details: ["path": url.path])
             return
         }
         frameImageView?.image = image
         previewPlaceholderLabel?.isHidden = true
         updateStatusLabel("Compositor preview live")
         writeStatus("preview_live")
+        appendPreviewLog(event: "live_preview_image_loaded", details: ["path": url.path])
     }
 
     private func discoverWaylandSocket(in runtimePath: String) -> String? {
@@ -596,6 +643,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
                 continue
             }
             if fileURL.lastPathComponent.hasPrefix("wayland-") {
+                appendPreviewLog(event: "live_preview_socket_found", details: ["socket": fileURL.lastPathComponent])
                 return fileURL.lastPathComponent
             }
         }
@@ -615,6 +663,39 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         let currentDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let candidate = currentDirectory.appendingPathComponent("scripts/wayland_capture.py")
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate.path : nil
+    }
+
+    private func appendPreviewLog(event: String, details: [String: String] = [:]) {
+        guard let previewLogFile = configuration.previewLogFile else {
+            return
+        }
+        let url = URL(fileURLWithPath: previewLogFile)
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        var payload: [String: String] = [
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "event": event,
+        ]
+        for (key, value) in details {
+            payload[key] = value
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        let entry = line + "\n"
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? entry.write(to: url, atomically: true, encoding: .utf8)
+            return
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else {
+            return
+        }
+        defer { try? handle.close() }
+        try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(entry.utf8))
     }
 
     private func previewTitle() -> String {

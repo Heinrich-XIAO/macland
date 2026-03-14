@@ -13,6 +13,7 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
     public var permissionHints: [PermissionKind]
     public var workingDirectory: String?
     public var statusFile: String?
+    public var previewLogFile: String?
     public var autoExitAfterChild: Bool
     public var captureImagePath: String?
     public var captureDelayMillis: Int?
@@ -26,6 +27,7 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
         permissionHints: [PermissionKind] = PermissionKind.requiredDefaults,
         workingDirectory: String? = nil,
         statusFile: String? = nil,
+        previewLogFile: String? = nil,
         autoExitAfterChild: Bool = false,
         captureImagePath: String? = nil,
         captureDelayMillis: Int? = nil,
@@ -38,6 +40,7 @@ public struct HostLaunchConfiguration: Codable, Equatable, Sendable {
         self.permissionHints = permissionHints
         self.workingDirectory = workingDirectory
         self.statusFile = statusFile
+        self.previewLogFile = previewLogFile
         self.autoExitAfterChild = autoExitAfterChild
         self.captureImagePath = captureImagePath
         self.captureDelayMillis = captureDelayMillis

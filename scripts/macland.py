@@ -75,6 +75,7 @@ class Manifest:
 class HostLaunchArtifacts:
     request_path: Path
     status_path: Path
+    preview_log_path: Path
     runtime_dir: Path
 
 
@@ -727,9 +728,12 @@ def create_host_launch_request(
     artifacts_root.mkdir(parents=True, exist_ok=True)
     request_path = artifacts_root / "host-launch.json"
     status_path = artifacts_root / "host-status.txt"
+    preview_log_path = artifacts_root / "host-preview.jsonl"
     runtime_dir = artifacts_root / "runtime"
     if status_path.exists():
         status_path.unlink()
+    if preview_log_path.exists():
+        preview_log_path.unlink()
     if runtime_dir.exists():
         shutil.rmtree(runtime_dir)
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -746,6 +750,7 @@ def create_host_launch_request(
         "permissionHints": ["accessibility", "inputMonitoring"],
         "workingDirectory": str(run_root),
         "statusFile": str(status_path),
+        "previewLogFile": str(preview_log_path),
         "autoExitAfterChild": True,
     }
     if image_path is not None:
@@ -754,7 +759,12 @@ def create_host_launch_request(
         request["autoExitAfterCapture"] = True
         request["autoExitAfterChild"] = False
     request_path.write_text(json.dumps(request, indent=2))
-    return HostLaunchArtifacts(request_path=request_path, status_path=status_path, runtime_dir=runtime_dir)
+    return HostLaunchArtifacts(
+        request_path=request_path,
+        status_path=status_path,
+        preview_log_path=preview_log_path,
+        runtime_dir=runtime_dir,
+    )
 
 
 def create_image_capture_artifacts(workspace: Path, repo_id: str, image_path: Path) -> ImageCaptureArtifacts:
