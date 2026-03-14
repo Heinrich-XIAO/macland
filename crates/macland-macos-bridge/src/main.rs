@@ -149,6 +149,10 @@ impl BridgeState {
 
         for (pid, mac_window) in &self.cached_windows {
             if !self.windows.contains_key(pid) {
+                eprintln!(
+                    "macland-macos-bridge: creating Wayland window for {} (PID:{})",
+                    mac_window.name, pid
+                );
                 let surface = self.compositor.create_surface(qh, ());
                 let xdg_surface = self.xdg_wm_base.get_xdg_surface(&surface, qh, ());
                 let xdg_toplevel = xdg_surface.get_toplevel(qh, ());
@@ -168,6 +172,10 @@ impl BridgeState {
                         height: 100,
                         configured: false,
                     },
+                );
+                eprintln!(
+                    "macland-macos-bridge: created Wayland window for PID:{}",
+                    pid
                 );
             }
         }
@@ -282,7 +290,7 @@ fn resize_macos_window(pid: u32, width: u32, height: u32) {
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nif (item 1 of sz) > 30 then\nset pos to position of wnd\nset winId to id of wnd\nset end of w to {pidVal, pName, winId, item 1 of pos, item 2 of pos, item 1 of sz, item 2 of sz}\nend if\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
+        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nset pos to position of wnd\nset winId to id of wnd\nset end of w to {pidVal, pName, winId, item 1 of pos, item 2 of pos, item 1 of sz, item 2 of sz}\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
         .output();
     let mut windows = HashMap::new();
     if let Ok(out) = output {
@@ -335,7 +343,11 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
 fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame> {
     use std::process::Command;
 
-    if width < 50 || height < 50 {
+    if width < 10 || height < 10 {
+        eprintln!(
+            "macland-macos-bridge: skipping window too small: {}x{}",
+            width, height
+        );
         return None;
     }
 
