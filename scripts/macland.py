@@ -376,8 +376,11 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
         capture_compositor_image(workspace, manifest, run_root, image_path)
         write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
         return
-    artifacts = create_host_launch_request(workspace, manifest, run_root, mode, image_path)
-    launch_host(workspace, artifacts)
+    if should_use_preview_fallback():
+        launch_preview_window(workspace, manifest, run_root)
+    else:
+        artifacts = create_host_launch_request(workspace, manifest, run_root, mode, image_path)
+        launch_host(workspace, artifacts)
     write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
 
 
@@ -804,6 +807,48 @@ def resolve_binary(run_root: Path, binary: str) -> Path:
 def launch_host(workspace: Path, artifacts: HostLaunchArtifacts) -> None:
     command = host_launch_command(workspace, artifacts.request_path)
     run_checked(command, cwd=workspace)
+
+
+def should_use_preview_fallback() -> bool:
+    return platform.system().lower() == "darwin"
+
+
+def launch_preview_window(workspace: Path, manifest: Manifest, run_root: Path) -> None:
+    image_path = (artifacts_dir(workspace, manifest.repo_id) / "run" / "live-preview.png").resolve()
+    artifacts = create_image_capture_artifacts(workspace, manifest.repo_id, image_path)
+    binary, *arguments = manifest.entrypoint
+    command = [str(resolve_binary(run_root, binary)), *arguments]
+    env = workspace_command_env(workspace)
+    env.update(manifest.env)
+    env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
+    stdout_handle = artifacts.stdout_path.open("w")
+    stderr_handle = artifacts.stderr_path.open("w")
+    process = subprocess.Popen(command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle)
+    opened_preview = False
+    try:
+        socket_name = wait_for_wayland_socket(artifacts.runtime_dir, timeout_seconds=8.0)
+        if socket_name is None:
+            if process.poll() is not None:
+                raise CliError(render_compositor_failure(command, process.returncode, artifacts))
+            raise CliError("timed out waiting for compositor Wayland socket")
+        time.sleep(0.35)
+        while process.poll() is None:
+            run_reference_client_capture(workspace, artifacts, socket_name)
+            if not image_path.exists():
+                raise CliError(f"preview capture did not produce {image_path}")
+            if not opened_preview:
+                subprocess.Popen(["open", "-a", "Preview", str(image_path)], cwd=workspace)
+                opened_preview = True
+            time.sleep(0.8)
+    except KeyboardInterrupt as exc:
+        terminate_process(process)
+        raise CliInterrupted() from exc
+    finally:
+        if process.poll() is None:
+            terminate_process(process)
+        stdout_handle.close()
+        stderr_handle.close()
+        sanitize_capture_logs(artifacts)
 
 
 def capture_compositor_image(workspace: Path, manifest: Manifest, run_root: Path, image_path: Path) -> None:
