@@ -74,8 +74,7 @@ fn run() -> Result<(), String> {
 struct MacWindow {
     _pid: u32,
     name: String,
-    x: i32,
-    y: i32,
+    window_id: u32,
 }
 
 struct WaylandWindow {
@@ -182,11 +181,10 @@ impl BridgeState {
                 if wayland_window.width < 100 || wayland_window.height < 100 {
                     continue;
                 }
-                // Get macOS window position for capture
+                // Get macOS window for capture
                 if let Some(mac_window) = mac_windows.get(pid) {
                     if let Some(frame) = capture_window(
-                        mac_window.x,
-                        mac_window.y,
+                        mac_window.window_id,
                         wayland_window.width,
                         wayland_window.height,
                     ) {
@@ -278,27 +276,22 @@ fn resize_macos_window(pid: u32, width: u32, height: u32) {
 #[cfg(target_os = "macos")]
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
-    // Much simpler: just get visible window bounds from screencapture
-    // This avoids the slow osascript enumeration
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nif (item 1 of sz) > 30 then\nset pos to position of wnd\nset end of w to {pidVal, pName, item 1 of pos, item 2 of pos}\nend if\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
+        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nif (item 1 of sz) > 30 then\nset winId to id of wnd\nset end of w to {pidVal, pName, winId}\nend if\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
         .output();
     let mut windows = HashMap::new();
     if let Ok(out) = output {
         if out.status.success() {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 let parts: Vec<&str> = line.split(", ").collect();
-                if parts.len() >= 4 {
-                    if let (Ok(pid), Ok(x), Ok(y)) =
-                        (parts[0].parse(), parts[2].parse(), parts[3].parse())
-                    {
+                if parts.len() >= 3 {
+                    if let (Ok(pid), Ok(window_id)) = (parts[0].parse(), parts[2].parse()) {
                         windows.insert(
                             pid,
                             MacWindow {
                                 _pid: pid,
                                 name: parts[1].to_string(),
-                                x,
-                                y,
+                                window_id,
                             },
                         );
                     }
@@ -310,42 +303,54 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame> {
+fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame> {
     use std::process::Command;
 
     if width < 50 || height < 50 {
+        eprintln!(
+            "macland-macos-bridge: capture skipped: too small {}x{}",
+            width, height
+        );
         return None;
     }
 
     let output = Command::new("screencapture")
         .args([
             "-x",
-            "-R",
-            &format!("{},{},{},{}", x, y, width, height),
+            "-l",
+            &window_id.to_string(),
             "/tmp/macland_capture.png",
         ])
         .output();
 
     if let Ok(output) = output {
-        if output.status.success() {
-            let img = image::open("/tmp/macland_capture.png").unwrap();
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-
-            // Debug: print first few pixels as RGBA
-            let first: Vec<u8> = rgba.pixels().next().unwrap().0.to_vec();
-            eprintln!(
-                "macland-macos-bridge: image first pixel RGBA: {:02x?}",
-                first
-            );
-
-            if w > 0 && h > 0 {
-                return Some(WindowFrame {
-                    width: w,
-                    height: h,
-                    pixels: rgba.into_raw(),
-                });
+        if !output.status.success() {
+            eprintln!("macland-macos-bridge: capture failed: {:?}", output.stderr);
+            return None;
+        }
+        let img = match image::open("/tmp/macland_capture.png") {
+            Ok(img) => img,
+            Err(e) => {
+                eprintln!("macland-macos-bridge: image open failed: {}", e);
+                return None;
             }
+        };
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+
+        // Debug: print first few pixels as RGBA
+        let first: Vec<u8> = rgba.pixels().next().unwrap().0.to_vec();
+        eprintln!(
+            "macland-macos-bridge: image first pixel RGBA: {:02x?}",
+            first
+        );
+
+        if w > 0 && h > 0 {
+            return Some(WindowFrame {
+                width: w,
+                height: h,
+                pixels: rgba.into_raw(),
+            });
         }
     }
     None
