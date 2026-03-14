@@ -18,7 +18,7 @@ use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
 
-const FRAME_RATE: u32 = 10;
+const FRAME_RATE: u32 = 5;
 
 fn main() -> ExitCode {
     if let Err(err) = run() {
