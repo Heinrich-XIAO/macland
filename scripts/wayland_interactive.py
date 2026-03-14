@@ -670,6 +670,14 @@ class InteractiveViewer:
       }}
     }}
     function send(kind, extra) {{
+      if (kind === 'key') {{
+        console.log('[macland:key]', extra.code, extra.keysym, extra.pressed ? 'down' : 'up', {{
+          altKey: !!extra.altKey,
+          ctrlKey: !!extra.ctrlKey,
+          metaKey: !!extra.metaKey,
+          shiftKey: !!extra.shiftKey
+        }});
+      }}
       fetch('/input', {{
         method: 'POST',
         headers: {{'Content-Type': 'application/json'}},
