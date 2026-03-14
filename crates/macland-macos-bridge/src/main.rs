@@ -18,7 +18,7 @@ use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
 
-const FRAME_RATE: u32 = 5;
+const FRAME_RATE: u32 = 10;
 
 fn main() -> ExitCode {
     if let Err(err) = run() {
@@ -93,6 +93,9 @@ struct BridgeState {
     xdg_wm_base: XdgWmBase,
     shm: WlShm,
     windows: HashMap<u32, WaylandWindow>,
+    frame_count: u32,
+    last_enum: std::time::Instant,
+    cached_windows: HashMap<u32, MacWindow>,
 }
 
 impl BridgeState {
@@ -102,16 +105,35 @@ impl BridgeState {
             xdg_wm_base,
             shm,
             windows: HashMap::new(),
+            frame_count: 0,
+            last_enum: std::time::Instant::now(),
+            cached_windows: HashMap::new(),
         }
     }
 
     fn handle_frame(&mut self, qh: &QueueHandle<BridgeState>) {
-        let mac_windows = get_macos_windows();
+        self.frame_count += 1;
+
+        // Only enumerate windows once per second
+        if self.last_enum.elapsed().as_secs() >= 1 {
+            let start = std::time::Instant::now();
+            self.cached_windows = get_macos_windows();
+            let enum_time = start.elapsed();
+            eprintln!("macland-macos-bridge: enum: {:?}", enum_time);
+            self.last_enum = std::time::Instant::now();
+        }
+
+        // Skip every other frame for performance
+        if self.frame_count % 2 != 0 {
+            return;
+        }
+
+        let capture_start = std::time::Instant::now();
 
         for pid in self
             .windows
             .keys()
-            .filter(|p| !mac_windows.contains_key(p))
+            .filter(|p| !self.cached_windows.contains_key(p))
             .copied()
             .collect::<Vec<_>>()
         {
@@ -119,7 +141,7 @@ impl BridgeState {
             self.windows.remove(&pid);
         }
 
-        for (pid, mac_window) in &mac_windows {
+        for (pid, mac_window) in &self.cached_windows {
             if !self.windows.contains_key(pid) {
                 let surface = self.compositor.create_surface(qh, ());
                 let xdg_surface = self.xdg_wm_base.get_xdg_surface(&surface, qh, ());
@@ -146,6 +168,9 @@ impl BridgeState {
 
         let updates: Vec<(u32, WindowFrame)> = {
             let mut result = Vec::new();
+            let mac_windows = &self.cached_windows;
+
+            let capture_start = std::time::Instant::now();
             for (pid, wayland_window) in &mut self.windows {
                 if !wayland_window.configured {
                     continue;
@@ -166,13 +191,20 @@ impl BridgeState {
                     }
                 }
             }
+            let capture_time = capture_start.elapsed();
+            eprintln!("macland-macos-bridge: capture: {:?}", capture_time);
             result
         };
 
         for (pid, frame) in updates {
+            let update_start = std::time::Instant::now();
             if let Err(e) = self.update_window(pid, &frame, qh) {
                 eprintln!("macland-macos-bridge: update {} failed: {}", pid, e);
             }
+            eprintln!(
+                "macland-macos-bridge: update time: {:?}",
+                update_start.elapsed()
+            );
         }
     }
 
@@ -201,7 +233,7 @@ impl BridgeState {
             frame.width as i32,
             frame.height as i32,
             stride,
-            wl_shm::Format::Argb8888,
+            wl_shm::Format::Bgra8888,
             qh,
             (),
         );
@@ -270,24 +302,15 @@ fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame
 
     if let Ok(output) = output {
         if output.status.success() {
-            if let Ok(img) = image::open("/tmp/macland_capture.png") {
-                // Convert RGBA to ARGB for Wayland
-                let rgba = img.to_rgba8();
-                let (w, h) = rgba.dimensions();
-                if w > 0 && h > 0 {
-                    let mut argb: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
-                    for pixel in rgba.pixels() {
-                        argb.push(pixel[3]); // A
-                        argb.push(pixel[0]); // R
-                        argb.push(pixel[1]); // G
-                        argb.push(pixel[2]); // B
-                    }
-                    return Some(WindowFrame {
-                        width: w,
-                        height: h,
-                        pixels: argb,
-                    });
-                }
+            let img = image::open("/tmp/macland_capture.png").unwrap();
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            if w > 0 && h > 0 {
+                return Some(WindowFrame {
+                    width: w,
+                    height: h,
+                    pixels: rgba.into_raw(),
+                });
             }
         }
     }
