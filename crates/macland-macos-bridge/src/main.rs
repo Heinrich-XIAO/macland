@@ -243,7 +243,7 @@ impl BridgeState {
             frame.width as i32,
             frame.height as i32,
             stride,
-            wl_shm::Format::Bgra8888,
+            wl_shm::Format::Argb8888,
             qh,
             (),
         );
