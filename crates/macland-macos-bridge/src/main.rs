@@ -201,7 +201,7 @@ impl BridgeState {
             frame.width as i32,
             frame.height as i32,
             stride,
-            wl_shm::Format::Bgra8888,
+            wl_shm::Format::Argb8888,
             qh,
             (),
         );
@@ -271,21 +271,21 @@ fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame
     if let Ok(output) = output {
         if output.status.success() {
             if let Ok(img) = image::open("/tmp/macland_capture.png") {
-                // Convert RGBA to BGRA for Wayland
+                // Convert RGBA to ARGB for Wayland
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
                 if w > 0 && h > 0 {
-                    let mut bgra: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
+                    let mut argb: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
                     for pixel in rgba.pixels() {
-                        bgra.push(pixel[2]); // B (was R)
-                        bgra.push(pixel[1]); // G
-                        bgra.push(pixel[0]); // R (was B)
-                        bgra.push(pixel[3]); // A
+                        argb.push(pixel[3]); // A
+                        argb.push(pixel[0]); // R
+                        argb.push(pixel[1]); // G
+                        argb.push(pixel[2]); // B
                     }
                     return Some(WindowFrame {
                         width: w,
                         height: h,
-                        pixels: bgra,
+                        pixels: argb,
                     });
                 }
             }
