@@ -282,11 +282,6 @@ fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame
                     });
                 }
             }
-        } else {
-            eprintln!(
-                "macland-macos-bridge: screencapture failed: {:?}",
-                String::from_utf8_lossy(&output.stderr)
-            );
         }
     }
     None
@@ -398,7 +393,6 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
             xdg_toplevel::Event::Configure { width, height, .. } => {
                 for w in _state.windows.values_mut() {
                     if w.xdg_toplevel == *toplevel && width > 0 && height > 0 {
-                        eprintln!("macland-macos-bridge: configure {}x{}", width, height);
                         w.width = width as u32;
                         w.height = height as u32;
                         // Commit to apply the new size
