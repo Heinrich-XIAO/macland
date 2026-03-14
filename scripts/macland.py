@@ -377,7 +377,7 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
         write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
         return
     if should_use_preview_fallback():
-        launch_preview_window(workspace, manifest, run_root)
+        launch_interactive_window(workspace, manifest, run_root)
     else:
         artifacts = create_host_launch_request(workspace, manifest, run_root, mode, image_path)
         launch_host(workspace, artifacts)
@@ -813,7 +813,7 @@ def should_use_preview_fallback() -> bool:
     return platform.system().lower() == "darwin"
 
 
-def launch_preview_window(workspace: Path, manifest: Manifest, run_root: Path) -> None:
+def launch_interactive_window(workspace: Path, manifest: Manifest, run_root: Path) -> None:
     image_path = (artifacts_dir(workspace, manifest.repo_id) / "run" / "live-preview.png").resolve()
     artifacts = create_image_capture_artifacts(workspace, manifest.repo_id, image_path)
     binary, *arguments = manifest.entrypoint
@@ -824,22 +824,30 @@ def launch_preview_window(workspace: Path, manifest: Manifest, run_root: Path) -
     stdout_handle = artifacts.stdout_path.open("w")
     stderr_handle = artifacts.stderr_path.open("w")
     process = subprocess.Popen(command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle)
-    opened_preview = False
     try:
         socket_name = wait_for_wayland_socket(artifacts.runtime_dir, timeout_seconds=8.0)
         if socket_name is None:
             if process.poll() is not None:
                 raise CliError(render_compositor_failure(command, process.returncode, artifacts))
             raise CliError("timed out waiting for compositor Wayland socket")
-        time.sleep(0.35)
-        while process.poll() is None:
-            run_reference_client_capture(workspace, artifacts, socket_name)
-            if not image_path.exists():
-                raise CliError(f"preview capture did not produce {image_path}")
-            if not opened_preview:
-                subprocess.Popen(["open", "-a", "Preview", str(image_path)], cwd=workspace)
-                opened_preview = True
-            time.sleep(0.8)
+        interactive_env = os.environ.copy()
+        interactive_env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
+        interactive_env["WAYLAND_DISPLAY"] = socket_name
+        interactive_env["MACLAND_INTERACTIVE_LOG"] = str(
+            artifacts_dir(workspace, manifest.repo_id) / "run" / "interactive-host.log"
+        )
+        run_checked(
+            [
+                sys.executable,
+                str(workspace / "scripts" / "wayland_interactive.py"),
+                str(artifacts.runtime_dir),
+                socket_name,
+                str(image_path),
+                f"macland - {manifest.repo_id}",
+            ],
+            cwd=workspace,
+            env=interactive_env,
+        )
     except KeyboardInterrupt as exc:
         terminate_process(process)
         raise CliInterrupted() from exc

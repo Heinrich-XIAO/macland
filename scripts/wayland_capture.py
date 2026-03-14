@@ -318,7 +318,14 @@ def bind(conn: WaylandSocket, registry_id: int, name: int, interface_name: str, 
     return object_id
 
 
-def capture_output(runtime_dir: str, display_name: str, image_path: Path, report_path: Path | None) -> None:
+def capture_output(
+    runtime_dir: str,
+    display_name: str,
+    image_path: Path,
+    report_path: Path | None,
+    *,
+    include_demo_surface: bool = True,
+) -> None:
     conn = WaylandSocket(runtime_dir, display_name)
     report = {
         "connected": True,
@@ -338,12 +345,17 @@ def capture_output(runtime_dir: str, display_name: str, image_path: Path, report
             "zwlr_screencopy_manager_v1",
             min(3, globals_found.screencopy_version),
         )
-        surface_id, xdg_surface_id, toplevel_id, demo_buffer = create_demo_toplevel(
-            conn,
-            globals_found,
-            shm_id,
-            runtime_dir,
-        )
+        surface_id = None
+        xdg_surface_id = None
+        toplevel_id = None
+        demo_buffer = None
+        if include_demo_surface:
+            surface_id, xdg_surface_id, toplevel_id, demo_buffer = create_demo_toplevel(
+                conn,
+                globals_found,
+                shm_id,
+                runtime_dir,
+            )
 
         frame_id = conn.new_id("zwlr_screencopy_frame_v1")
         conn.send(manager_id, 0, pack_u32(frame_id) + pack_i32(0) + pack_u32(output_id))
@@ -410,10 +422,14 @@ def capture_output(runtime_dir: str, display_name: str, image_path: Path, report
             destroy_shm_buffer(conn, screenshot_buffer)
             conn.send(frame_id, 1)
             conn.send(manager_id, 2)
-            conn.send(toplevel_id, 0)
-            conn.send(xdg_surface_id, 0)
-            conn.send(surface_id, 0)
-            destroy_shm_buffer(conn, demo_buffer)
+            if toplevel_id is not None:
+                conn.send(toplevel_id, 0)
+            if xdg_surface_id is not None:
+                conn.send(xdg_surface_id, 0)
+            if surface_id is not None:
+                conn.send(surface_id, 0)
+            if demo_buffer is not None:
+                destroy_shm_buffer(conn, demo_buffer)
             roundtrip(conn)
         finally:
             pass
@@ -459,18 +475,32 @@ def write_png(path: Path, info: BufferInfo, raw: bytes, flags: int) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 3:
-        print("usage: wayland_capture.py <output.png> [report.json]", file=sys.stderr)
+    args = argv[1:]
+    include_demo_surface = True
+    if args and args[0] == "--no-demo-surface":
+        include_demo_surface = False
+        args = args[1:]
+    if len(args) < 1:
+        print(
+            "usage: wayland_capture.py [--no-demo-surface] <output.png> [report.json]",
+            file=sys.stderr,
+        )
         return 1
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
     display_name = os.environ.get("WAYLAND_DISPLAY")
     if not runtime_dir or not display_name:
         print("XDG_RUNTIME_DIR and WAYLAND_DISPLAY are required", file=sys.stderr)
         return 1
-    image_path = Path(argv[1]).resolve()
-    report_path = Path(argv[2]).resolve() if len(argv) > 2 else None
+    image_path = Path(args[0]).resolve()
+    report_path = Path(args[1]).resolve() if len(args) > 1 else None
     try:
-        capture_output(runtime_dir, display_name, image_path, report_path)
+        capture_output(
+            runtime_dir,
+            display_name,
+            image_path,
+            report_path,
+            include_demo_surface=include_demo_surface,
+        )
         return 0
     except CaptureError as err:
         print(f"error: {err}", file=sys.stderr)
