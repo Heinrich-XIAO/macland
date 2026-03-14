@@ -75,6 +75,10 @@ struct MacWindow {
     _pid: u32,
     name: String,
     window_id: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
 }
 
 struct WaylandWindow {
@@ -184,9 +188,10 @@ impl BridgeState {
                 // Get macOS window for capture
                 if let Some(mac_window) = mac_windows.get(pid) {
                     if let Some(frame) = capture_window(
-                        mac_window.window_id,
-                        wayland_window.width,
-                        wayland_window.height,
+                        mac_window.x,
+                        mac_window.y,
+                        mac_window.width,
+                        mac_window.height,
                     ) {
                         result.push((*pid, frame));
                     }
@@ -277,57 +282,87 @@ fn resize_macos_window(pid: u32, width: u32, height: u32) {
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nif (item 1 of sz) > 30 then\nset winId to id of wnd\nset end of w to {pidVal, pName, winId}\nend if\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
+        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nif (item 1 of sz) > 30 then\nset pos to position of wnd\nset winId to id of wnd\nset end of w to {pidVal, pName, winId, item 1 of pos, item 2 of pos, item 1 of sz, item 2 of sz}\nend if\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
         .output();
     let mut windows = HashMap::new();
     if let Ok(out) = output {
         if out.status.success() {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 let parts: Vec<&str> = line.split(", ").collect();
-                if parts.len() >= 3 {
-                    if let (Ok(pid), Ok(window_id)) = (parts[0].parse(), parts[2].parse()) {
+                if parts.len() >= 7 {
+                    if let (Ok(pid), Ok(window_id), Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                        parts[0].parse(),
+                        parts[2].parse(),
+                        parts[3].parse(),
+                        parts[4].parse(),
+                        parts[5].parse(),
+                        parts[6].parse(),
+                    ) {
+                        eprintln!("macland-macos-bridge: found window: pid={}, name={}, win_id={}, bounds={}x{}+{}+{}",
+                            pid, parts[1], window_id, width, height, x, y);
                         windows.insert(
                             pid,
                             MacWindow {
                                 _pid: pid,
                                 name: parts[1].to_string(),
                                 window_id,
+                                x,
+                                y,
+                                width,
+                                height,
                             },
                         );
                     }
                 }
             }
+        } else {
+            eprintln!(
+                "macland-macos-bridge: osascript failed: {:?}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
+    } else {
+        eprintln!("macland-macos-bridge: osascript command failed");
     }
+    eprintln!(
+        "macland-macos-bridge: total windows found: {}",
+        windows.len()
+    );
     windows
 }
 
 #[cfg(target_os = "macos")]
-fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame> {
+fn capture_window(x: i32, y: i32, width: u32, height: u32) -> Option<WindowFrame> {
     use std::process::Command;
 
     if width < 50 || height < 50 {
-        eprintln!(
-            "macland-macos-bridge: capture skipped: too small {}x{}",
-            width, height
-        );
         return None;
     }
 
+    let capture_start = std::time::Instant::now();
+
+    // Use rectangle capture instead of window ID - much faster!
     let output = Command::new("screencapture")
         .args([
             "-x",
-            "-l",
-            &window_id.to_string(),
+            "-R",
+            &format!("{},{},{},{}", x, y, width, height),
             "/tmp/macland_capture.png",
         ])
         .output();
 
+    let screencapture_time = capture_start.elapsed();
+
     if let Ok(output) = output {
         if !output.status.success() {
-            eprintln!("macland-macos-bridge: capture failed: {:?}", output.stderr);
+            eprintln!(
+                "macland-macos-bridge: capture failed: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             return None;
         }
+
+        let load_start = std::time::Instant::now();
         let img = match image::open("/tmp/macland_capture.png") {
             Ok(img) => img,
             Err(e) => {
@@ -337,12 +372,11 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
         };
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
+        let load_time = load_start.elapsed();
 
-        // Debug: print first few pixels as RGBA
-        let first: Vec<u8> = rgba.pixels().next().unwrap().0.to_vec();
         eprintln!(
-            "macland-macos-bridge: image first pixel RGBA: {:02x?}",
-            first
+            "macland-macos-bridge: capture: screencapture={:?}, load={:?}, size={}x{}",
+            screencapture_time, load_time, w, h
         );
 
         if w > 0 && h > 0 {
@@ -352,6 +386,11 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
                 pixels: rgba.into_raw(),
             });
         }
+    } else {
+        eprintln!(
+            "macland-macos-bridge: screencapture command failed: {:?}",
+            output.err()
+        );
     }
     None
 }
