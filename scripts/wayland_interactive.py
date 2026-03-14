@@ -122,6 +122,90 @@ KEYSYM_TO_EVDEV = {
     "super_r": 126,
 }
 
+BROWSER_CODE_TO_EVDEV = {
+    "Escape": 1,
+    "Digit1": 2,
+    "Digit2": 3,
+    "Digit3": 4,
+    "Digit4": 5,
+    "Digit5": 6,
+    "Digit6": 7,
+    "Digit7": 8,
+    "Digit8": 9,
+    "Digit9": 10,
+    "Digit0": 11,
+    "Minus": 12,
+    "Equal": 13,
+    "Backspace": 14,
+    "Tab": 15,
+    "KeyQ": 16,
+    "KeyW": 17,
+    "KeyE": 18,
+    "KeyR": 19,
+    "KeyT": 20,
+    "KeyY": 21,
+    "KeyU": 22,
+    "KeyI": 23,
+    "KeyO": 24,
+    "KeyP": 25,
+    "BracketLeft": 26,
+    "BracketRight": 27,
+    "Enter": 28,
+    "ControlLeft": 29,
+    "KeyA": 30,
+    "KeyS": 31,
+    "KeyD": 32,
+    "KeyF": 33,
+    "KeyG": 34,
+    "KeyH": 35,
+    "KeyJ": 36,
+    "KeyK": 37,
+    "KeyL": 38,
+    "Semicolon": 39,
+    "Quote": 40,
+    "Backquote": 41,
+    "ShiftLeft": 42,
+    "Backslash": 43,
+    "KeyZ": 44,
+    "KeyX": 45,
+    "KeyC": 46,
+    "KeyV": 47,
+    "KeyB": 48,
+    "KeyN": 49,
+    "KeyM": 50,
+    "Comma": 51,
+    "Period": 52,
+    "Slash": 53,
+    "ShiftRight": 54,
+    "AltLeft": 56,
+    "Space": 57,
+    "CapsLock": 58,
+    "F1": 59,
+    "F2": 60,
+    "F3": 61,
+    "F4": 62,
+    "F5": 63,
+    "F6": 64,
+    "F7": 65,
+    "F8": 66,
+    "F9": 67,
+    "F10": 68,
+    "ControlRight": 97,
+    "AltRight": 100,
+    "Home": 102,
+    "ArrowUp": 103,
+    "PageUp": 104,
+    "ArrowLeft": 105,
+    "ArrowRight": 106,
+    "End": 107,
+    "ArrowDown": 108,
+    "PageDown": 109,
+    "Insert": 110,
+    "Delete": 111,
+    "MetaLeft": 125,
+    "MetaRight": 126,
+}
+
 
 class InteractiveError(RuntimeError):
     pass
@@ -453,10 +537,10 @@ class InteractiveViewer:
         if delta:
             self.input_session.axis(1, float(-delta) / 120.0, int(-delta / 120))
 
-    def handle_key(self, keysym: str, pressed: bool) -> None:
+    def handle_key(self, keysym: str, code: str, pressed: bool) -> None:
         if self.input_session is None:
             return
-        keycode = map_keysym(keysym)
+        keycode = map_key_event(keysym, code)
         if keycode is not None:
             self.input_session.key(keycode, pressed)
 
@@ -546,11 +630,16 @@ class InteractiveViewer:
         body: JSON.stringify({{type: kind, ...extra}})
       }}).catch(() => {{}});
     }}
-    stage.addEventListener('click', () => stage.focus());
+    function focusStage() {{
+      stage.focus();
+    }}
+    window.addEventListener('load', focusStage);
+    stage.addEventListener('click', focusStage);
     screen.addEventListener('mousemove', (event) => {{
       send('motion', {{x: event.offsetX, y: event.offsetY, width: screen.clientWidth, height: screen.clientHeight}});
     }});
     screen.addEventListener('mousedown', (event) => {{
+      focusStage();
       const buttons = {{0: 'left', 1: 'middle', 2: 'right'}};
       send('button', {{button: buttons[event.button] || 'left', pressed: true}});
     }});
@@ -565,10 +654,12 @@ class InteractiveViewer:
     }}, {{passive: false}});
     stage.addEventListener('keydown', (event) => {{
       if (event.repeat) return;
-      send('key', {{keysym: event.key, pressed: true}});
+      event.preventDefault();
+      send('key', {{keysym: event.key, code: event.code, pressed: true}});
     }});
     stage.addEventListener('keyup', (event) => {{
-      send('key', {{keysym: event.key, pressed: false}});
+      event.preventDefault();
+      send('key', {{keysym: event.key, code: event.code, pressed: false}});
     }});
     refreshFrame();
     refreshStatus();
@@ -632,7 +723,11 @@ class InteractiveViewer:
                 elif event_type == "wheel":
                     host.handle_mousewheel(float(payload.get("delta", 0)))
                 elif event_type == "key":
-                    host.handle_key(str(payload.get("keysym", "")), bool(payload.get("pressed")))
+                    host.handle_key(
+                        str(payload.get("keysym", "")),
+                        str(payload.get("code", "")),
+                        bool(payload.get("pressed")),
+                    )
                 self.send_response(204)
                 self.end_headers()
 
@@ -671,6 +766,14 @@ def map_keysym(keysym: str) -> int | None:
         " ": "space",
     }
     return KEYSYM_TO_EVDEV.get(aliases.get(normalized, normalized))
+
+
+def map_key_event(keysym: str, code: str) -> int | None:
+    if code:
+        mapped = BROWSER_CODE_TO_EVDEV.get(code)
+        if mapped is not None:
+            return mapped
+    return map_keysym(keysym)
 
 
 def main(argv: list[str]) -> int:
