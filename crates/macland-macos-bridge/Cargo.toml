@@ -14,3 +14,5 @@ wayland-protocols-wlr = { version = "0.3.11", features = ["client"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 image = "0.25"
+core-foundation = "0.9"
+core-graphics = "0.23"
