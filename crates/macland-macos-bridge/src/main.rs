@@ -287,12 +287,98 @@ fn resize_macos_window(pid: u32, width: u32, height: u32) {
 }
 
 #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
 
-    // Use AppleScript to enumerate windows with their bounds
-    // Output format: "pid|name|x|y|width|height" per line
-    let script = r#"tell application "System Events"
+    // Try to get windows using Python with pyobjc, or fall back to a simple method
+    // First, let's try using screencapture to list windows
+    let output = Command::new("screencapture").args(["-l", ""]).output();
+
+    // If that doesn't work, use AppleScript which does return real window IDs
+    // Actually, AppleScript returns the process ID, not the window ID.
+    // Let's try a different approach - use the window title as the identifier
+    // and capture using window selection mode
+
+    // For now, let's try to capture using a Python script with pyobjc
+    let script = r#"
+import subprocess
+import sys
+
+try:
+    from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+    
+    window_list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
+    windows = []
+    for w in window_list:
+        pid = w.get('kCGWindowOwnerPID', 0)
+        name = w.get('kCGWindowName', '')
+        owner_name = w.get('kCGWindowOwnerName', '')
+        window_id = w.get('kCGWindowNumber', 0)
+        bounds = w.get('kCGWindowBounds', {})
+        
+        # Skip system windows and our own
+        if owner_name and 'macland' not in owner_name.lower() and owner_name not in ['Window Server', 'loginwindow']:
+            windows.append({
+                'pid': pid,
+                'window_id': window_id,
+                'name': name or owner_name,
+                'x': int(bounds.get('X', 0)),
+                'y': int(bounds.get('Y', 0)),
+                'width': int(bounds.get('Width', 800)),
+                'height': int(bounds.get('Height', 600))
+            })
+    
+    for w in windows:
+        print(f"{w['pid']}|{w['window_id']}|{w['name']}|{w['x']}|{w['y']}|{w['width']}|{w['height']}")
+except ImportError:
+    # pyobjc not available, try using screencapture interactively
+    sys.exit(1)
+"#;
+
+    let output = Command::new("python3").args(["-c", script]).output();
+
+    let mut windows = HashMap::new();
+    if let Ok(out) = output {
+        if out.status.success() {
+            let output_str = String::from_utf8_lossy(&out.stdout);
+            for (i, line) in output_str.lines().enumerate() {
+                // Parse: pid|window_id|name|x|y|width|height
+                let parts: Vec<&str> = line.split('|').collect();
+                if parts.len() >= 7 {
+                    if let (Ok(pid), Ok(window_id), Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                        parts[0].parse::<u32>(),
+                        parts[1].parse::<u32>(),
+                        parts[3].parse::<i32>(),
+                        parts[4].parse::<i32>(),
+                        parts[5].parse::<u32>(),
+                        parts[6].parse::<u32>(),
+                    ) {
+                        let name = parts[2].to_string();
+                        eprintln!("macland-macos-bridge: found window: pid={}, win_id={}, name={}, bounds={}x{}+{}+{}",
+                            pid, window_id, name, width, height, x, y);
+                        windows.insert(
+                            window_id,
+                            MacWindow {
+                                _pid: pid,
+                                name: format!("{} (PID:{})", name, pid),
+                                window_id,
+                                x,
+                                y,
+                                width,
+                                height,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: if no windows found, try the AppleScript approach
+    if windows.is_empty() {
+        eprintln!("macland-macos-bridge: Python script failed, falling back to AppleScript");
+        let script = r#"tell application "System Events"
 set output to ""
 repeat with p in (every process whose background only is false)
 try
@@ -313,53 +399,47 @@ end repeat
 return output
 end tell"#;
 
-    let output = Command::new("osascript").args(["-e", &script]).output();
+        let output = Command::new("osascript").args(["-e", &script]).output();
 
-    let mut windows = HashMap::new();
-    if let Ok(out) = output {
-        if out.status.success() {
-            let output_str = String::from_utf8_lossy(&out.stdout);
-            for (i, line) in output_str.lines().enumerate() {
-                // Parse: pid|name|x|y|width|height
-                let parts: Vec<&str> = line.split('|').collect();
-                if parts.len() >= 6 {
-                    if let (Ok(pid), Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                        parts[0].parse::<u32>(),
-                        parts[2].parse::<i32>(),
-                        parts[3].parse::<i32>(),
-                        parts[4].parse::<u32>(),
-                        parts[5].parse::<u32>(),
-                    ) {
-                        let name = parts[1].to_string();
-                        if !name.contains("macland") {
-                            eprintln!("macland-macos-bridge: found window: pid={}, name={}, bounds={}x{}+{}+{}",
-                                pid, name, width, height, x, y);
-                            // Use unique ID for each window
-                            let window_id = pid * 1000 + i as u32;
-                            windows.insert(
-                                window_id,
-                                MacWindow {
-                                    _pid: pid,
-                                    name: format!("{} (PID:{})", name, pid),
+        if let Ok(out) = output {
+            if out.status.success() {
+                let output_str = String::from_utf8_lossy(&out.stdout);
+                for (i, line) in output_str.lines().enumerate() {
+                    // Parse: pid|name|x|y|width|height
+                    let parts: Vec<&str> = line.split('|').collect();
+                    if parts.len() >= 6 {
+                        if let (Ok(pid), Ok(x), Ok(y), Ok(width), Ok(height)) = (
+                            parts[0].parse::<u32>(),
+                            parts[2].parse::<i32>(),
+                            parts[3].parse::<i32>(),
+                            parts[4].parse::<u32>(),
+                            parts[5].parse::<u32>(),
+                        ) {
+                            let name = parts[1].to_string();
+                            if !name.contains("macland") {
+                                // Generate a synthetic window ID for capture
+                                // This won't work with screencapture -l, but we can try the rectangle method
+                                let window_id = pid * 1000 + i as u32;
+                                eprintln!("macland-macos-bridge: found window (synthetic ID): pid={}, win_id={}, name={}, bounds={}x{}+{}+{}",
+                                    pid, window_id, name, width, height, x, y);
+                                windows.insert(
                                     window_id,
-                                    x,
-                                    y,
-                                    width,
-                                    height,
-                                },
-                            );
+                                    MacWindow {
+                                        _pid: pid,
+                                        name: format!("{} (PID:{})", name, pid),
+                                        window_id,
+                                        x,
+                                        y,
+                                        width,
+                                        height,
+                                    },
+                                );
+                            }
                         }
                     }
                 }
             }
-        } else {
-            eprintln!(
-                "macland-macos-bridge: osascript failed: {:?}",
-                String::from_utf8_lossy(&out.stderr)
-            );
         }
-    } else {
-        eprintln!("macland-macos-bridge: osascript command failed");
     }
 
     eprintln!(
@@ -393,12 +473,25 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
 
     if let Ok(output) = output {
         if !output.status.success() {
+            // Try rectangle capture as fallback
             eprintln!(
-                "macland-macos-bridge: capture failed for window {}: {:?}",
-                window_id,
+                "macland-macos-bridge: window ID capture failed, trying screen capture: {:?}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            return None;
+            let output = Command::new("screencapture")
+                .args(["-x", "/tmp/macland_capture.png"])
+                .output();
+            if let Ok(output) = output {
+                if !output.status.success() {
+                    eprintln!(
+                        "macland-macos-bridge: screen capture failed: {:?}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    return None;
+                }
+            } else {
+                return None;
+            }
         }
 
         let load_start = std::time::Instant::now();
