@@ -536,7 +536,8 @@ class InputSession:
         now = int(time.time() * 1000) & 0xFFFFFFFF
         state = KEY_PRESSED if pressed else KEY_RELEASED
         xkb_keycode = keycode + XKB_KEYCODE_OFFSET
-        self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(xkb_keycode) + pack_u32(state))
+        # zwp_virtual_keyboard_v1 expects evdev keycodes (no XKB offset).
+        self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(keycode) + pack_u32(state))
         depressed, latched, locked, group = self.xkb_state.update_key(xkb_keycode, pressed)
         self.conn.send(
             self.keyboard_id,
@@ -564,6 +565,8 @@ class InteractiveViewer:
         self.capture_failed: str | None = None
         self.input_failed: str | None = None
         self.input_session: InputSession | None = None
+        self.last_frame_size: tuple[int, int] | None = None
+        self.focus_sent = False
         try:
             log_event("capture.prefight.begin")
             capture_output(
@@ -637,6 +640,9 @@ class InteractiveViewer:
                     include_demo_surface=False,
                 )
                 self.capture_failed = None
+                self.update_frame_size()
+                if self.input_session is not None:
+                    self.ensure_focus()
                 log_event("capture.loop.ready")
             except Exception as err:
                 self.capture_failed = str(err)
@@ -668,18 +674,46 @@ class InteractiveViewer:
     ) -> None:
         if self.input_session is None:
             return
+        self.ensure_focus()
         desired_modifiers = modifier_keycodes_from_state(modifiers or {})
         keycode = map_key_event(keysym, code)
         if keycode is not None:
             if keycode not in MODIFIER_KEYCODES:
                 self.input_session.sync_modifiers(desired_modifiers)
-            log_event(f"input.key {code or keysym} -> {keycode + XKB_KEYCODE_OFFSET} {'down' if pressed else 'up'}")
+            log_event(f"input.key {code or keysym} -> {keycode} {'down' if pressed else 'up'}")
             self.input_session.key(keycode, pressed)
             if keycode in MODIFIER_KEYCODES:
                 if pressed:
                     self.input_session.active_modifiers.add(keycode)
                 else:
                     self.input_session.active_modifiers.discard(keycode)
+
+    def update_frame_size(self) -> None:
+        if not self.image_path.exists():
+            return
+        try:
+            with self.image_path.open("rb") as handle:
+                header = handle.read(24)
+            if len(header) < 24 or header[0:8] != b"\x89PNG\r\n\x1a\n":
+                return
+            width = int.from_bytes(header[16:20], "big")
+            height = int.from_bytes(header[20:24], "big")
+            if width > 0 and height > 0:
+                self.last_frame_size = (width, height)
+        except OSError:
+            return
+
+    def ensure_focus(self) -> None:
+        if self.focus_sent or self.input_session is None or self.last_frame_size is None:
+            return
+        width, height = self.last_frame_size
+        if width <= 0 or height <= 0:
+            return
+        self.input_session.move_absolute(width // 2, height // 2, width, height)
+        self.input_session.button(BTN_LEFT, True)
+        self.input_session.button(BTN_LEFT, False)
+        self.focus_sent = True
+        log_event("input.focus.sent")
 
     def status_payload(self) -> dict[str, str | bool | None]:
         return {
