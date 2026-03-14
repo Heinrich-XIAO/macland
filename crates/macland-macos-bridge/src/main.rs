@@ -364,84 +364,170 @@ fn resize_macos_window(pid: u32, width: u32, height: u32) {
 
 #[cfg(target_os = "macos")]
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
-    use std::process::Command;
-
-    // Use AppleScript to enumerate windows with their bounds
-    // Output format: "pid|name|x|y|width|height" per line
-    let script = r#"tell application "System Events"
-set output to ""
-repeat with p in (every process whose background only is false)
-try
-set pid to id of p
-set pname to name of p
-repeat with w in (every window of p)
-try
-set sz to size of w
-set pos to position of w
-if (item 1 of sz) > 30 then
-set output to output & pid & "|" & pname & "|" & (item 1 of pos) & "|" & (item 2 of pos) & "|" & (item 1 of sz) & "|" & (item 2 of sz) & "
-"
-end if
-end try
-end repeat
-end try
-end repeat
-return output
-end tell"#;
-
-    let output = Command::new("osascript").args(["-e", &script]).output();
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
+    use core_graphics::window::{
+        copy_window_info, kCGNullWindowID, kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionOnScreenOnly,
+    };
 
     let mut windows = HashMap::new();
-    if let Ok(out) = output {
-        if out.status.success() {
-            let output_str = String::from_utf8_lossy(&out.stdout);
-            for (i, line) in output_str.lines().enumerate() {
-                eprintln!("macland-macos-bridge: enum raw line {}: {:?}", i, line);
-                // Parse: pid|name|x|y|width|height
-                let parts: Vec<&str> = line.split('|').collect();
-                eprintln!("macland-macos-bridge: enum parsed parts {}: {:?}", i, parts);
-                if parts.len() >= 6 {
-                    if let (Ok(pid), Ok(x), Ok(y), Ok(width), Ok(height)) = (
-                        parts[0].parse::<u32>(),
-                        parts[2].parse::<i32>(),
-                        parts[3].parse::<i32>(),
-                        parts[4].parse::<u32>(),
-                        parts[5].parse::<u32>(),
-                    ) {
-                        let name = parts[1].to_string();
-                        if !name.contains("macland") {
-                            eprintln!("macland-macos-bridge: found window: pid={}, name={}, bounds={}x{}+{}+{}",
-                                pid, name, width, height, x, y);
-                            // Use unique ID for each window
-                            let window_id = pid * 1000 + i as u32;
-                            eprintln!(
-                                "macland-macos-bridge: enum synthetic key={} from pid={} index={}",
-                                window_id, pid, i
-                            );
-                            windows.insert(
-                                window_id,
-                                MacWindow {
-                                    _pid: pid,
-                                    name: format!("{} (PID:{})", name, pid),
-                                    window_id,
-                                    x,
-                                    y,
-                                    width,
-                                    height,
-                                },
-                            );
-                        }
-                    }
-                }
+    let option = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+
+    if let Some(window_info) = copy_window_info(option, kCGNullWindowID) {
+        let key_owner_pid = CFString::new("kCGWindowOwnerPID");
+        let key_window_number = CFString::new("kCGWindowNumber");
+        let key_window_name = CFString::new("kCGWindowName");
+        let key_owner_name = CFString::new("kCGWindowOwnerName");
+        let key_bounds = CFString::new("kCGWindowBounds");
+        let key_x = CFString::new("X");
+        let key_y = CFString::new("Y");
+        let key_width = CFString::new("Width");
+        let key_height = CFString::new("Height");
+
+        for (index, dict_ref) in window_info.iter().enumerate() {
+            let dict_cf_type = unsafe { CFType::wrap_under_get_rule(*dict_ref) };
+            let Some(dict_untyped) = dict_cf_type.downcast::<CFDictionary>() else {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} non-dictionary window record",
+                    index
+                );
+                continue;
+            };
+            let dict: CFDictionary<CFString, CFType> =
+                unsafe { CFDictionary::wrap_under_get_rule(dict_untyped.as_concrete_TypeRef()) };
+
+            let pid = dict
+                .find(key_owner_pid.clone())
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_i64())
+                .map(|v| v as u32);
+            let window_id = dict
+                .find(key_window_number.clone())
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_i64())
+                .map(|v| v as u32);
+            let owner_name = dict
+                .find(key_owner_name.clone())
+                .and_then(|v| v.downcast::<CFString>())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let window_name = dict
+                .find(key_window_name.clone())
+                .and_then(|v| v.downcast::<CFString>())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+
+            let Some(pid) = pid else {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} missing pid owner={:?} title={:?}",
+                    index, owner_name, window_name
+                );
+                continue;
+            };
+            let Some(window_id) = window_id else {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} missing window_id pid={} owner={:?} title={:?}",
+                    index, pid, owner_name, window_name
+                );
+                continue;
+            };
+
+            if owner_name.contains("macland")
+                || owner_name == "Window Server"
+                || owner_name == "Dock"
+                || owner_name == "loginwindow"
+            {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} filtered owner={:?} pid={} window_id={}",
+                    index, owner_name, pid, window_id
+                );
+                continue;
             }
-        } else {
+
+            let Some(bounds_cf) = dict
+                .find(key_bounds.clone())
+                .and_then(|v| v.downcast::<CFDictionary>())
+            else {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} missing bounds pid={} window_id={} owner={:?} title={:?}",
+                    index, pid, window_id, owner_name, window_name
+                );
+                continue;
+            };
+
+            let bounds_cf_type = bounds_cf.to_untyped().into_CFType();
+            let Some(bounds_untyped) = bounds_cf_type.downcast::<CFDictionary>() else {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} bounds downcast failed pid={} window_id={}",
+                    index, pid, window_id
+                );
+                continue;
+            };
+            let bounds: CFDictionary<CFString, CFType> =
+                unsafe { CFDictionary::wrap_under_get_rule(bounds_untyped.as_concrete_TypeRef()) };
+
+            let x = bounds
+                .find(key_x.clone())
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_f64())
+                .map(|v| v as i32)
+                .unwrap_or(0);
+            let y = bounds
+                .find(key_y.clone())
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_f64())
+                .map(|v| v as i32)
+                .unwrap_or(0);
+            let width = bounds
+                .find(key_width.clone())
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_f64())
+                .map(|v| v as u32)
+                .unwrap_or(0);
+            let height = bounds
+                .find(key_height.clone())
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|n| n.to_f64())
+                .map(|v| v as u32)
+                .unwrap_or(0);
+
             eprintln!(
-                "macland-macos-bridge: osascript failed: {:?}",
-                String::from_utf8_lossy(&out.stderr)
+                "macland-macos-bridge: quartz raw {} pid={} real_window_id={} owner={:?} title={:?} bounds={}x{}+{}+{}",
+                index, pid, window_id, owner_name, window_name, width, height, x, y
+            );
+
+            if width <= 30 || height <= 30 {
+                eprintln!(
+                    "macland-macos-bridge: quartz skip {} too small pid={} window_id={} bounds={}x{}+{}+{}",
+                    index, pid, window_id, width, height, x, y
+                );
+                continue;
+            }
+
+            let display_name = if window_name.is_empty() {
+                owner_name.clone()
+            } else {
+                format!("{} - {}", owner_name, window_name)
+            };
+
+            windows.insert(
+                window_id,
+                MacWindow {
+                    _pid: pid,
+                    name: display_name,
+                    window_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                },
             );
         }
     } else {
-        eprintln!("macland-macos-bridge: osascript command failed");
+        eprintln!("macland-macos-bridge: quartz copy_window_info returned none");
     }
 
     eprintln!(
