@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import array
+import ctypes
+import ctypes.util
 import json
 import os
 import signal
@@ -209,6 +211,14 @@ BROWSER_CODE_TO_EVDEV = {
 
 MODIFIER_KEYCODES = {29, 42, 54, 56, 97, 100, 125, 126}
 
+XKB_KEYMAP_FORMAT_TEXT_V1 = 1
+XKB_KEY_DOWN = 1
+XKB_KEY_UP = 0
+XKB_STATE_MODS_DEPRESSED = 1
+XKB_STATE_MODS_LATCHED = 2
+XKB_STATE_MODS_LOCKED = 4
+XKB_STATE_LAYOUT_EFFECTIVE = 8
+
 
 class InteractiveError(RuntimeError):
     pass
@@ -234,6 +244,78 @@ def log_event(message: str) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a") as handle:
         handle.write(f"{time.time():.3f} {message}\n")
+
+
+def load_xkbcommon() -> ctypes.CDLL:
+    path = ctypes.util.find_library("xkbcommon")
+    if not path:
+        raise InteractiveError("libxkbcommon is unavailable")
+    library = ctypes.CDLL(path)
+    library.xkb_context_new.argtypes = [ctypes.c_int]
+    library.xkb_context_new.restype = ctypes.c_void_p
+    library.xkb_context_unref.argtypes = [ctypes.c_void_p]
+    library.xkb_keymap_new_from_string.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_int,
+    ]
+    library.xkb_keymap_new_from_string.restype = ctypes.c_void_p
+    library.xkb_keymap_unref.argtypes = [ctypes.c_void_p]
+    library.xkb_state_new.argtypes = [ctypes.c_void_p]
+    library.xkb_state_new.restype = ctypes.c_void_p
+    library.xkb_state_unref.argtypes = [ctypes.c_void_p]
+    library.xkb_state_update_key.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+    library.xkb_state_update_key.restype = ctypes.c_int
+    library.xkb_state_serialize_mods.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    library.xkb_state_serialize_mods.restype = ctypes.c_uint32
+    library.xkb_state_serialize_layout.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    library.xkb_state_serialize_layout.restype = ctypes.c_uint32
+    return library
+
+
+XKBCOMMON = load_xkbcommon()
+
+
+class XkbState:
+    def __init__(self, keymap_text: str) -> None:
+        self.context = XKBCOMMON.xkb_context_new(0)
+        if not self.context:
+            raise InteractiveError("failed to create xkb context")
+        self.keymap = XKBCOMMON.xkb_keymap_new_from_string(
+            self.context,
+            keymap_text.encode("utf-8"),
+            XKB_KEYMAP_FORMAT_TEXT_V1,
+            0,
+        )
+        if not self.keymap:
+            XKBCOMMON.xkb_context_unref(self.context)
+            raise InteractiveError("failed to create xkb keymap")
+        self.state = XKBCOMMON.xkb_state_new(self.keymap)
+        if not self.state:
+            XKBCOMMON.xkb_keymap_unref(self.keymap)
+            XKBCOMMON.xkb_context_unref(self.context)
+            raise InteractiveError("failed to create xkb state")
+
+    def close(self) -> None:
+        if self.state:
+            XKBCOMMON.xkb_state_unref(self.state)
+            self.state = None
+        if self.keymap:
+            XKBCOMMON.xkb_keymap_unref(self.keymap)
+            self.keymap = None
+        if self.context:
+            XKBCOMMON.xkb_context_unref(self.context)
+            self.context = None
+
+    def update_key(self, xkb_keycode: int, pressed: bool) -> tuple[int, int, int, int]:
+        direction = XKB_KEY_DOWN if pressed else XKB_KEY_UP
+        XKBCOMMON.xkb_state_update_key(self.state, xkb_keycode, direction)
+        depressed = int(XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_DEPRESSED))
+        latched = int(XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_LATCHED))
+        locked = int(XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_LOCKED))
+        group = int(XKBCOMMON.xkb_state_serialize_layout(self.state, XKB_STATE_LAYOUT_EFFECTIVE))
+        return depressed, latched, locked, group
 
 
 @dataclass
@@ -366,6 +448,8 @@ class InputSession:
     def __init__(self, runtime_dir: str, display_name: str) -> None:
         log_event("input.connect")
         self.conn = WaylandSocket(runtime_dir, display_name)
+        self.keymap_text = default_keymap_text()
+        self.xkb_state = XkbState(self.keymap_text)
         registry_id, globals_found = discover_globals(self.conn)
         if globals_found.seat_name is None:
             raise InteractiveError("compositor does not expose wl_seat")
@@ -394,7 +478,7 @@ class InputSession:
         self.conn.send(keyboard_manager_id, 0, pack_u32(seat_id) + pack_u32(self.keyboard_id))
         roundtrip(self.conn)
         log_event("input.keymap")
-        self._install_keymap(default_keymap_text())
+        self._install_keymap(self.keymap_text)
         self.active_modifiers: set[int] = set()
         log_event("input.ready")
 
@@ -404,6 +488,7 @@ class InputSession:
             self.conn.send(self.pointer_id, 8)
         except Exception:
             pass
+        self.xkb_state.close()
         self.conn.close()
 
     def _install_keymap(self, keymap_text: str) -> None:
@@ -452,6 +537,12 @@ class InputSession:
         state = KEY_PRESSED if pressed else KEY_RELEASED
         xkb_keycode = keycode + XKB_KEYCODE_OFFSET
         self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(xkb_keycode) + pack_u32(state))
+        depressed, latched, locked, group = self.xkb_state.update_key(xkb_keycode, pressed)
+        self.conn.send(
+            self.keyboard_id,
+            2,
+            pack_u32(depressed) + pack_u32(latched) + pack_u32(locked) + pack_u32(group),
+        )
 
     def sync_modifiers(self, desired_modifiers: set[int]) -> None:
         for keycode in sorted(self.active_modifiers - desired_modifiers):
