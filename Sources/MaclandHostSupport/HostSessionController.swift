@@ -9,6 +9,12 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     private var compositorProcess: Process?
     private var managedRuntimeDirectory: URL?
     private var statusLabel: NSTextField?
+    private var frameImageView: NSImageView?
+    private var previewPlaceholderLabel: NSTextField?
+    private var captureTimer: Timer?
+    private var captureInFlight = false
+    private var liveCaptureImageURL: URL?
+    private var liveCaptureReportURL: URL?
 
     public init(configuration: HostLaunchConfiguration) {
         self.configuration = configuration
@@ -71,7 +77,14 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        captureTimer?.invalidate()
         compositorProcess?.terminate()
+        if let liveCaptureImageURL {
+            try? FileManager.default.removeItem(at: liveCaptureImageURL)
+        }
+        if let liveCaptureReportURL {
+            try? FileManager.default.removeItem(at: liveCaptureReportURL)
+        }
         if let managedRuntimeDirectory {
             try? FileManager.default.removeItem(at: managedRuntimeDirectory)
         }
@@ -147,6 +160,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
             compositorProcess = process
             updateStatusLabel("Compositor running")
             writeStatus("child_started")
+            startLivePreviewIfPossible()
         } catch {
             updateStatusLabel("Launch failed: \(error.localizedDescription)")
             writeStatus("child_failed:\(error.localizedDescription)")
@@ -322,6 +336,25 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         preview.layer?.cornerRadius = 18
         panel.addSubview(preview)
 
+        let imageView = NSImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.imageAlignment = .alignCenter
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 18
+        imageView.layer?.masksToBounds = true
+        preview.addSubview(imageView)
+        self.frameImageView = imageView
+
+        let placeholder = NSTextField(wrappingLabelWithString: "Waiting for compositor frames…")
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
+        placeholder.alignment = .center
+        placeholder.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        placeholder.textColor = NSColor(calibratedWhite: 1.0, alpha: 0.82)
+        placeholder.maximumNumberOfLines = 2
+        self.previewPlaceholderLabel = placeholder
+        preview.addSubview(placeholder)
+
         let accent = NSView()
         accent.translatesAutoresizingMaskIntoConstraints = false
         accent.wantsLayer = true
@@ -406,6 +439,15 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
             preview.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 20),
             preview.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -24),
 
+            imageView.leadingAnchor.constraint(equalTo: preview.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: preview.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: preview.bottomAnchor),
+
+            placeholder.centerXAnchor.constraint(equalTo: preview.centerXAnchor),
+            placeholder.centerYAnchor.constraint(equalTo: preview.centerYAnchor),
+            placeholder.widthAnchor.constraint(lessThanOrEqualTo: preview.widthAnchor, multiplier: 0.78),
+
             accent.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: 22),
             accent.topAnchor.constraint(equalTo: preview.topAnchor, constant: 22),
             accent.widthAnchor.constraint(equalToConstant: 160),
@@ -444,6 +486,135 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         ])
 
         return scene
+    }
+
+    private func startLivePreviewIfPossible() {
+        guard configuration.captureImagePath == nil else {
+            return
+        }
+        guard let runtimePath = compositorRuntimeDirectoryPath() else {
+            updateStatusLabel("Preview waiting for runtime dir")
+            return
+        }
+
+        let token = UUID().uuidString
+        let tempDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        liveCaptureImageURL = tempDirectory.appendingPathComponent("macland-live-\(token).png")
+        liveCaptureReportURL = tempDirectory.appendingPathComponent("macland-live-\(token).json")
+
+        captureTimer?.invalidate()
+        captureTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.captureLiveFrame(runtimePath: runtimePath)
+            }
+        }
+        captureTimer?.tolerance = 0.2
+        captureLiveFrame(runtimePath: runtimePath)
+    }
+
+    private func compositorRuntimeDirectoryPath() -> String? {
+        if let configured = configuration.environment["XDG_RUNTIME_DIR"], !configured.isEmpty {
+            return configured
+        }
+        return managedRuntimeDirectory?.path
+    }
+
+    private func captureLiveFrame(runtimePath: String) {
+        guard !captureInFlight else {
+            return
+        }
+        guard let liveCaptureImageURL, let liveCaptureReportURL else {
+            return
+        }
+        guard let socketName = discoverWaylandSocket(in: runtimePath) else {
+            updateStatusLabel("Waiting for Wayland socket…")
+            return
+        }
+        guard let python = resolvePythonExecutable(),
+              let script = resolveCaptureScript() else {
+            updateStatusLabel("Live preview unavailable: missing capture runtime")
+            return
+        }
+
+        captureInFlight = true
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [
+            script,
+            liveCaptureImageURL.path,
+            liveCaptureReportURL.path,
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["XDG_RUNTIME_DIR"] = runtimePath
+        environment["WAYLAND_DISPLAY"] = socketName
+        process.environment = environment
+        process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        process.terminationHandler = { [weak self] process in
+            Task { @MainActor in
+                guard let self else {
+                    return
+                }
+                self.captureInFlight = false
+                if process.terminationStatus == 0 {
+                    self.loadLiveFrame(from: liveCaptureImageURL)
+                }
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            captureInFlight = false
+            updateStatusLabel("Live preview failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadLiveFrame(from url: URL) {
+        guard let image = NSImage(contentsOf: url) else {
+            return
+        }
+        frameImageView?.image = image
+        previewPlaceholderLabel?.isHidden = true
+        updateStatusLabel("Compositor preview live")
+        writeStatus("preview_live")
+    }
+
+    private func discoverWaylandSocket(in runtimePath: String) -> String? {
+        let runtimeURL = URL(fileURLWithPath: runtimePath, isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(
+            at: runtimeURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for case let fileURL as URL in enumerator {
+            let type = try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.type] as? FileAttributeType
+            guard type == .typeSocket else {
+                continue
+            }
+            if fileURL.lastPathComponent.hasPrefix("wayland-") {
+                return fileURL.lastPathComponent
+            }
+        }
+        return nil
+    }
+
+    private func resolvePythonExecutable() -> String? {
+        let candidates = [
+            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            "/opt/homebrew/bin/python3",
+            "/usr/bin/python3",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private func resolveCaptureScript() -> String? {
+        let currentDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let candidate = currentDirectory.appendingPathComponent("scripts/wayland_capture.py")
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate.path : nil
     }
 
     private func previewTitle() -> String {
