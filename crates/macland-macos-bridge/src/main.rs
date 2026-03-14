@@ -96,6 +96,7 @@ struct BridgeState {
     frame_count: u32,
     last_enum: std::time::Instant,
     cached_windows: HashMap<u32, MacWindow>,
+    last_window_count: usize,
 }
 
 impl BridgeState {
@@ -108,19 +109,26 @@ impl BridgeState {
             frame_count: 0,
             last_enum: std::time::Instant::now(),
             cached_windows: HashMap::new(),
+            last_window_count: 0,
         }
     }
 
     fn handle_frame(&mut self, qh: &QueueHandle<BridgeState>) {
         self.frame_count += 1;
 
-        // Only enumerate windows once per second
-        if self.last_enum.elapsed().as_secs() >= 1 {
+        // Only enumerate when window count changes or every 3 seconds
+        let current_count = self.windows.len();
+        let needs_enum =
+            self.last_window_count != current_count || self.last_enum.elapsed().as_secs() >= 3;
+
+        if needs_enum {
             let start = std::time::Instant::now();
-            self.cached_windows = get_macos_windows();
+            let new_windows = get_macos_windows();
             let enum_time = start.elapsed();
             eprintln!("macland-macos-bridge: enum: {:?}", enum_time);
+            self.cached_windows = new_windows;
             self.last_enum = std::time::Instant::now();
+            self.last_window_count = self.cached_windows.len();
         }
 
         // Skip every other frame for performance
@@ -254,8 +262,10 @@ struct WindowFrame {
 #[cfg(target_os = "macos")]
 fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
+    // Much simpler: just get visible window bounds from screencapture
+    // This avoids the slow osascript enumeration
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\"\nset windowList to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with w in (every window of p)\nset wPos to position of w\nset wSize to size of w\nif (item 1 of wSize) > 50 then\nset end of windowList to {pidVal, pName, item 1 of wPos, item 2 of wPos, item 1 of wSize, item 2 of wSize}\nend if\nend repeat\nend try\nend repeat\nreturn windowList\nend tell"])
+        .args(["-e", "tell application \"System Events\"\nset w to {}\nrepeat with p in (every process whose background only is false and name is not \"macland-macos-bridge\")\ntry\nset pidVal to id of p\nset pName to name of p\nrepeat with wnd in (every window of p)\nset sz to size of wnd\nif (item 1 of sz) > 30 then\nset pos to position of wnd\nset end of w to {pidVal, pName, item 1 of pos, item 2 of pos}\nend if\nend repeat\nend try\nend repeat\nreturn w\nend tell"])
         .output();
     let mut windows = HashMap::new();
     if let Ok(out) = output {
