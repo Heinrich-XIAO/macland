@@ -291,38 +291,37 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
     use std::process::Command;
 
     // Use AppleScript to enumerate windows with their bounds
-    let output = Command::new("osascript")
-        .args(["-e", r#"
-tell application "System Events"
-    set window_info to {}
-    repeat with p in (every process whose background only is false)
-        try
-            set pid to id of p
-            set pname to name of p
-            if pname is not "macland-macos-bridge" then
-                repeat with w in (every window of p)
-                    try
-                        set sz to size of w
-                        set pos to position of w
-                        if (item 1 of sz) > 30 then
-                            set window_info to window_info & pid & "," & pname & "," & (item 1 of pos) & "," & (item 2 of pos) & "," & (item 1 of sz) & "," & (item 2 of sz) & "\n"
-                        end if
-                    end try
-                end repeat
-            end if
-        end try
-    end repeat
-    return window_info
-end tell
-"#])
-        .output();
+    // Output format: "pid|name|x|y|width|height" per line
+    let script = r#"tell application "System Events"
+set output to ""
+repeat with p in (every process whose background only is false)
+try
+set pid to id of p
+set pname to name of p
+repeat with w in (every window of p)
+try
+set sz to size of w
+set pos to position of w
+if (item 1 of sz) > 30 then
+set output to output & pid & "|" & pname & "|" & (item 1 of pos) & "|" & (item 2 of pos) & "|" & (item 1 of sz) & "|" & (item 2 of sz) & "
+"
+end if
+end try
+end repeat
+end try
+end repeat
+return output
+end tell"#;
+
+    let output = Command::new("osascript").args(["-e", &script]).output();
 
     let mut windows = HashMap::new();
     if let Ok(out) = output {
         if out.status.success() {
             let output_str = String::from_utf8_lossy(&out.stdout);
             for (i, line) in output_str.lines().enumerate() {
-                let parts: Vec<&str> = line.split(",").collect();
+                // Parse: pid|name|x|y|width|height
+                let parts: Vec<&str> = line.split('|').collect();
                 if parts.len() >= 6 {
                     if let (Ok(pid), Ok(x), Ok(y), Ok(width), Ok(height)) = (
                         parts[0].parse::<u32>(),
@@ -332,22 +331,24 @@ end tell
                         parts[5].parse::<u32>(),
                     ) {
                         let name = parts[1].to_string();
-                        eprintln!("macland-macos-bridge: found window: pid={}, name={}, bounds={}x{}+{}+{}",
-                            pid, name, width, height, x, y);
-                        // Use unique ID for each window
-                        let window_id = pid * 1000 + i as u32;
-                        windows.insert(
-                            window_id,
-                            MacWindow {
-                                _pid: pid,
-                                name: format!("{} (PID:{})", name, pid),
+                        if !name.contains("macland") {
+                            eprintln!("macland-macos-bridge: found window: pid={}, name={}, bounds={}x{}+{}+{}",
+                                pid, name, width, height, x, y);
+                            // Use unique ID for each window
+                            let window_id = pid * 1000 + i as u32;
+                            windows.insert(
                                 window_id,
-                                x,
-                                y,
-                                width,
-                                height,
-                            },
-                        );
+                                MacWindow {
+                                    _pid: pid,
+                                    name: format!("{} (PID:{})", name, pid),
+                                    window_id,
+                                    x,
+                                    y,
+                                    width,
+                                    height,
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -378,7 +379,7 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
 
     let capture_start = std::time::Instant::now();
 
-    // Use window ID to capture specific window
+    // Capture specific window by ID
     let output = Command::new("screencapture")
         .args([
             "-x",
