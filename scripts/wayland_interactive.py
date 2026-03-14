@@ -212,6 +212,17 @@ class InteractiveError(RuntimeError):
     pass
 
 
+class InteractiveHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address) -> None:  # type: ignore[override]
+        exc_type, exc, _ = sys.exc_info()
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
+
 LOG_PATH: Path | None = Path(os.environ["MACLAND_INTERACTIVE_LOG"]) if "MACLAND_INTERACTIVE_LOG" in os.environ else None
 
 
@@ -448,6 +459,7 @@ class InteractiveViewer:
         self.display_name = display_name
         self.title = title
         self.stop_event = threading.Event()
+        self.closed = False
         self.capture_failed: str | None = None
         self.input_failed: str | None = None
         self.input_session: InputSession | None = None
@@ -465,7 +477,7 @@ class InteractiveViewer:
             self.capture_failed = str(err)
             log_event(f"capture.prefight.error {err}")
         log_event("viewer.server.begin")
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), self.make_handler())
+        self.server = InteractiveHTTPServer(("127.0.0.1", 0), self.make_handler())
         self.server.timeout = 0.5
         self.base_url = f"http://127.0.0.1:{self.server.server_address[1]}"
         log_event(f"viewer.server.ready {self.base_url}")
@@ -486,6 +498,9 @@ class InteractiveViewer:
         return 0
 
     def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         log_event("viewer.close")
         self.stop_event.set()
         try:
@@ -497,6 +512,10 @@ class InteractiveViewer:
             self.server.server_close()
         except Exception:
             pass
+        current = threading.current_thread()
+        for thread in (getattr(self, "capture_thread", None), getattr(self, "input_thread", None)):
+            if thread is not None and thread.is_alive() and thread is not current:
+                thread.join(timeout=1)
 
     def init_input_session(self) -> None:
         try:
@@ -676,6 +695,12 @@ class InteractiveViewer:
         host = self
 
         class Handler(BaseHTTPRequestHandler):
+            def safe_write(self, payload: bytes) -> None:
+                try:
+                    self.wfile.write(payload)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    return
+
             def do_GET(self):
                 if self.path.startswith("/frame.png"):
                     if not host.image_path.exists():
@@ -688,7 +713,7 @@ class InteractiveViewer:
                     self.send_header("Content-Length", str(len(payload)))
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
-                    self.wfile.write(payload)
+                    self.safe_write(payload)
                     return
                 if self.path == "/status":
                     payload = json.dumps(host.status_payload()).encode("utf-8")
@@ -696,14 +721,14 @@ class InteractiveViewer:
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(payload)))
                     self.end_headers()
-                    self.wfile.write(payload)
+                    self.safe_write(payload)
                     return
                 payload = host.html_page()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
-                self.wfile.write(payload)
+                self.safe_write(payload)
 
             def do_POST(self):
                 if self.path != "/input":
