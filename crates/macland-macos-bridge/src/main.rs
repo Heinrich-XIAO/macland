@@ -86,6 +86,7 @@ struct WaylandWindow {
     xdg_surface: XdgSurface,
     xdg_toplevel: XdgToplevel,
     buffer: Option<WlBuffer>,
+    mac_pid: u32,
     width: u32,
     height: u32,
     configured: bool,
@@ -156,6 +157,8 @@ impl BridgeState {
         // Create windows for found processes
         for (pid, mac_window) in &self.cached_windows {
             if !self.windows.contains_key(pid) {
+                let initial_width = mac_window.width.max(1);
+                let initial_height = mac_window.height.max(1);
                 eprintln!(
                     "macland-macos-bridge: creating Wayland window: key={} mac_pid={} mac_window_id={} title={:?} mac_bounds={}x{}+{}+{} initial_wayland={}x{} configured=false",
                     pid,
@@ -166,13 +169,16 @@ impl BridgeState {
                     mac_window.height,
                     mac_window.x,
                     mac_window.y,
-                    800,
-                    600
+                    initial_width,
+                    initial_height
                 );
                 let surface = self.compositor.create_surface(qh, ());
                 let xdg_surface = self.xdg_wm_base.get_xdg_surface(&surface, qh, ());
                 let xdg_toplevel = xdg_surface.get_toplevel(qh, ());
-                xdg_toplevel.set_title(format!("macOS Bridge - {} (PID:{})", mac_window.name, pid));
+                xdg_toplevel.set_title(format!(
+                    "macOS Bridge - {} (PID:{})",
+                    mac_window.name, mac_window._pid
+                ));
                 xdg_toplevel.set_app_id("com.macland.bridge".to_string());
                 // Set a reasonable default size
                 xdg_toplevel.set_min_size(400, 300);
@@ -184,16 +190,17 @@ impl BridgeState {
                         xdg_surface,
                         xdg_toplevel,
                         buffer: None,
-                        width: 800,
-                        height: 600,
+                        mac_pid: mac_window._pid,
+                        width: initial_width,
+                        height: initial_height,
                         configured: false,
                     },
                 );
                 eprintln!(
                     "macland-macos-bridge: created Wayland window: key={} surface_committed=true min_size=400x300 stored_wayland={}x{} configured=false",
                     pid,
-                    800,
-                    600
+                    initial_width,
+                    initial_height
                 );
             }
         }
@@ -555,6 +562,7 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
     let output = Command::new("screencapture")
         .args([
             "-x",
+            "-o",
             "-l",
             &window_id.to_string(),
             "/tmp/macland_capture.png",
@@ -730,27 +738,41 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
         match event {
             xdg_toplevel::Event::Configure { width, height, .. } => {
                 for (pid, w) in _state.windows.iter_mut() {
-                    if w.xdg_toplevel == *toplevel && width > 0 && height > 0 {
-                        let new_width = width as u32;
-                        let new_height = height as u32;
+                    if w.xdg_toplevel == *toplevel {
+                        let resolved_width = if width > 0 { width as u32 } else { w.width };
+                        let resolved_height = if height > 0 { height as u32 } else { w.height };
                         eprintln!(
-                            "macland-macos-bridge: xdg_toplevel configure: key={} new={}x{} old={}x{} configured={}",
+                            "macland-macos-bridge: xdg_toplevel configure: key={} raw={}x{} resolved={}x{} old={}x{} configured={}",
                             pid,
-                            new_width,
-                            new_height,
+                            width,
+                            height,
+                            resolved_width,
+                            resolved_height,
                             w.width,
                             w.height,
                             w.configured
                         );
-                        // Resize the macOS window to match
-                        resize_macos_window(*pid, new_width, new_height);
-                        w.width = new_width;
-                        w.height = new_height;
+                        if width <= 0 || height <= 0 {
+                            eprintln!(
+                                "macland-macos-bridge: xdg_toplevel configure preserved previous size: key={} raw={}x{} stored_wayland={}x{}",
+                                pid,
+                                width,
+                                height,
+                                w.width,
+                                w.height
+                            );
+                            continue;
+                        }
+                        // Resize the macOS window to match using the owning process id.
+                        resize_macos_window(w.mac_pid, resolved_width, resolved_height);
+                        w.width = resolved_width;
+                        w.height = resolved_height;
                         // Commit to apply the new size
                         w.surface.commit();
                         eprintln!(
-                            "macland-macos-bridge: xdg_toplevel configure applied: key={} stored_wayland={}x{} surface_commit=true",
+                            "macland-macos-bridge: xdg_toplevel configure applied: key={} mac_pid={} stored_wayland={}x{} surface_commit=true",
                             pid,
+                            w.mac_pid,
                             w.width,
                             w.height
                         );
