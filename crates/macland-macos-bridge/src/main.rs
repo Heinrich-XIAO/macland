@@ -173,7 +173,7 @@ impl BridgeState {
             let mut result = Vec::new();
             let mac_windows = &self.cached_windows;
 
-            let capture_start = std::time::Instant::now();
+            let _capture_start = std::time::Instant::now();
             for (pid, wayland_window) in &mut self.windows {
                 if !wayland_window.configured {
                     continue;
@@ -243,7 +243,7 @@ impl BridgeState {
             frame.width as i32,
             frame.height as i32,
             stride,
-            wl_shm::Format::Argb8888,
+            wl_shm::Format::Abgr8888,
             qh,
             (),
         );
