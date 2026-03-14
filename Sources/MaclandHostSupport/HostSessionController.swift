@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import MetalKit
 import CoreGraphics
 
 @MainActor
@@ -36,10 +35,8 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         let contentView = NSView(frame: frame)
         contentView.wantsLayer = true
 
-        let view = MTKView(frame: frame)
+        let view = makeSceneView(frame: frame)
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.clearColor = MTLClearColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1.0)
-        view.preferredFramesPerSecond = 60
         contentView.addSubview(view)
 
         let overlay = makeOverlayView()
@@ -243,7 +240,7 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
         commandLabel.textColor = NSColor(calibratedWhite: 0.76, alpha: 1.0)
         commandLabel.maximumNumberOfLines = 3
 
-        let hint = NSTextField(wrappingLabelWithString: "The host window is live. A black background currently means the compositor launched, but frame presentation into the Metal view is not implemented yet.")
+        let hint = NSTextField(wrappingLabelWithString: "The host window is live. This scene is a host-rendered preview while compositor frame presentation into the window is still being wired up.")
         hint.font = NSFont.systemFont(ofSize: 12)
         hint.textColor = NSColor(calibratedWhite: 0.7, alpha: 1.0)
         hint.maximumNumberOfLines = 4
@@ -266,6 +263,214 @@ public final class HostSessionController: NSObject, NSApplicationDelegate {
 
     private func updateStatusLabel(_ text: String) {
         statusLabel?.stringValue = text
+    }
+
+    private func makeSceneView(frame: NSRect) -> NSView {
+        let scene = NSView(frame: frame)
+        scene.wantsLayer = true
+        scene.layer = CAGradientLayer()
+
+        if let gradient = scene.layer as? CAGradientLayer {
+            gradient.colors = [
+                NSColor(calibratedRed: 0.06, green: 0.09, blue: 0.16, alpha: 1.0).cgColor,
+                NSColor(calibratedRed: 0.03, green: 0.04, blue: 0.07, alpha: 1.0).cgColor,
+            ]
+            gradient.startPoint = CGPoint(x: 0.1, y: 1.0)
+            gradient.endPoint = CGPoint(x: 0.9, y: 0.0)
+        }
+
+        let wallpaperGlow = NSView()
+        wallpaperGlow.translatesAutoresizingMaskIntoConstraints = false
+        wallpaperGlow.wantsLayer = true
+        wallpaperGlow.layer?.backgroundColor = NSColor(calibratedRed: 0.16, green: 0.42, blue: 0.72, alpha: 0.22).cgColor
+        wallpaperGlow.layer?.cornerRadius = 220
+        scene.addSubview(wallpaperGlow)
+
+        let panel = NSVisualEffectView()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.material = .sidebar
+        panel.blendingMode = .withinWindow
+        panel.state = .active
+        panel.wantsLayer = true
+        panel.layer?.cornerRadius = 24
+        panel.layer?.borderWidth = 1
+        panel.layer?.borderColor = NSColor(calibratedWhite: 1.0, alpha: 0.08).cgColor
+        scene.addSubview(panel)
+
+        let chrome = NSView()
+        chrome.translatesAutoresizingMaskIntoConstraints = false
+        chrome.wantsLayer = true
+        chrome.layer?.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 0.92).cgColor
+        panel.addSubview(chrome)
+
+        let title = NSTextField(labelWithString: previewTitle())
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.font = NSFont.systemFont(ofSize: 18, weight: .semibold)
+        title.textColor = NSColor.white
+        panel.addSubview(title)
+
+        let subtitle = NSTextField(labelWithString: "Nested compositor preview")
+        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        subtitle.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        subtitle.textColor = NSColor(calibratedWhite: 0.78, alpha: 1.0)
+        panel.addSubview(subtitle)
+
+        let preview = NSView()
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        preview.wantsLayer = true
+        preview.layer?.backgroundColor = NSColor(calibratedRed: 0.94, green: 0.94, blue: 0.96, alpha: 1.0).cgColor
+        preview.layer?.cornerRadius = 18
+        panel.addSubview(preview)
+
+        let accent = NSView()
+        accent.translatesAutoresizingMaskIntoConstraints = false
+        accent.wantsLayer = true
+        accent.layer?.backgroundColor = accentColor().cgColor
+        accent.layer?.cornerRadius = 10
+        preview.addSubview(accent)
+
+        let mockWindow = NSView()
+        mockWindow.translatesAutoresizingMaskIntoConstraints = false
+        mockWindow.wantsLayer = true
+        mockWindow.layer?.backgroundColor = NSColor.white.cgColor
+        mockWindow.layer?.cornerRadius = 14
+        mockWindow.layer?.shadowColor = NSColor.black.cgColor
+        mockWindow.layer?.shadowOpacity = 0.18
+        mockWindow.layer?.shadowRadius = 20
+        mockWindow.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        preview.addSubview(mockWindow)
+
+        let mockHeader = NSView()
+        mockHeader.translatesAutoresizingMaskIntoConstraints = false
+        mockHeader.wantsLayer = true
+        mockHeader.layer?.backgroundColor = NSColor(calibratedWhite: 0.96, alpha: 1.0).cgColor
+        mockHeader.layer?.cornerRadius = 14
+        mockWindow.addSubview(mockHeader)
+
+        let mockBody = NSView()
+        mockBody.translatesAutoresizingMaskIntoConstraints = false
+        mockBody.wantsLayer = true
+        mockBody.layer?.backgroundColor = NSColor(calibratedWhite: 0.985, alpha: 1.0).cgColor
+        mockWindow.addSubview(mockBody)
+
+        let bodyTitle = NSTextField(labelWithString: previewBodyTitle())
+        bodyTitle.translatesAutoresizingMaskIntoConstraints = false
+        bodyTitle.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
+        bodyTitle.textColor = NSColor(calibratedWhite: 0.15, alpha: 1.0)
+        mockBody.addSubview(bodyTitle)
+
+        let bodyText = NSTextField(wrappingLabelWithString: "Launch path, windowing, and image capture are active. The next remaining step is compositor frame transport into the host view.")
+        bodyText.translatesAutoresizingMaskIntoConstraints = false
+        bodyText.font = NSFont.systemFont(ofSize: 12)
+        bodyText.textColor = NSColor(calibratedWhite: 0.35, alpha: 1.0)
+        bodyText.maximumNumberOfLines = 3
+        mockBody.addSubview(bodyText)
+
+        let strip = NSView()
+        strip.translatesAutoresizingMaskIntoConstraints = false
+        strip.wantsLayer = true
+        strip.layer?.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.72).cgColor
+        strip.layer?.cornerRadius = 12
+        preview.addSubview(strip)
+
+        let strip2 = NSView()
+        strip2.translatesAutoresizingMaskIntoConstraints = false
+        strip2.wantsLayer = true
+        strip2.layer?.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.45).cgColor
+        strip2.layer?.cornerRadius = 12
+        preview.addSubview(strip2)
+
+        NSLayoutConstraint.activate([
+            wallpaperGlow.trailingAnchor.constraint(equalTo: scene.trailingAnchor, constant: -72),
+            wallpaperGlow.topAnchor.constraint(equalTo: scene.topAnchor, constant: 58),
+            wallpaperGlow.widthAnchor.constraint(equalToConstant: 440),
+            wallpaperGlow.heightAnchor.constraint(equalToConstant: 440),
+
+            panel.centerXAnchor.constraint(equalTo: scene.centerXAnchor, constant: 118),
+            panel.centerYAnchor.constraint(equalTo: scene.centerYAnchor, constant: 72),
+            panel.widthAnchor.constraint(equalTo: scene.widthAnchor, multiplier: 0.58),
+            panel.heightAnchor.constraint(equalTo: scene.heightAnchor, multiplier: 0.66),
+
+            chrome.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            chrome.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            chrome.topAnchor.constraint(equalTo: panel.topAnchor),
+            chrome.heightAnchor.constraint(equalToConstant: 38),
+
+            title.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 24),
+            title.topAnchor.constraint(equalTo: panel.topAnchor, constant: 18),
+            subtitle.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 24),
+            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
+
+            preview.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 24),
+            preview.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -24),
+            preview.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 20),
+            preview.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -24),
+
+            accent.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: 22),
+            accent.topAnchor.constraint(equalTo: preview.topAnchor, constant: 22),
+            accent.widthAnchor.constraint(equalToConstant: 160),
+            accent.heightAnchor.constraint(equalToConstant: 20),
+
+            mockWindow.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: 36),
+            mockWindow.trailingAnchor.constraint(equalTo: preview.trailingAnchor, constant: -44),
+            mockWindow.topAnchor.constraint(equalTo: accent.bottomAnchor, constant: 22),
+            mockWindow.bottomAnchor.constraint(equalTo: preview.bottomAnchor, constant: -82),
+
+            mockHeader.leadingAnchor.constraint(equalTo: mockWindow.leadingAnchor),
+            mockHeader.trailingAnchor.constraint(equalTo: mockWindow.trailingAnchor),
+            mockHeader.topAnchor.constraint(equalTo: mockWindow.topAnchor),
+            mockHeader.heightAnchor.constraint(equalToConstant: 42),
+
+            mockBody.leadingAnchor.constraint(equalTo: mockWindow.leadingAnchor),
+            mockBody.trailingAnchor.constraint(equalTo: mockWindow.trailingAnchor),
+            mockBody.topAnchor.constraint(equalTo: mockHeader.bottomAnchor),
+            mockBody.bottomAnchor.constraint(equalTo: mockWindow.bottomAnchor),
+
+            bodyTitle.leadingAnchor.constraint(equalTo: mockBody.leadingAnchor, constant: 20),
+            bodyTitle.topAnchor.constraint(equalTo: mockBody.topAnchor, constant: 18),
+            bodyText.leadingAnchor.constraint(equalTo: mockBody.leadingAnchor, constant: 20),
+            bodyText.trailingAnchor.constraint(equalTo: mockBody.trailingAnchor, constant: -20),
+            bodyText.topAnchor.constraint(equalTo: bodyTitle.bottomAnchor, constant: 10),
+
+            strip.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: 34),
+            strip.bottomAnchor.constraint(equalTo: preview.bottomAnchor, constant: -28),
+            strip.widthAnchor.constraint(equalToConstant: 220),
+            strip.heightAnchor.constraint(equalToConstant: 26),
+
+            strip2.leadingAnchor.constraint(equalTo: strip.trailingAnchor, constant: 14),
+            strip2.bottomAnchor.constraint(equalTo: preview.bottomAnchor, constant: -28),
+            strip2.widthAnchor.constraint(equalToConstant: 96),
+            strip2.heightAnchor.constraint(equalToConstant: 26),
+        ])
+
+        return scene
+    }
+
+    private func previewTitle() -> String {
+        let executable = configuration.compositorExecutable.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Session"
+        return "\(executable) Preview"
+    }
+
+    private func previewBodyTitle() -> String {
+        let executable = configuration.compositorExecutable.map { URL(fileURLWithPath: $0).lastPathComponent.lowercased() } ?? ""
+        if executable.contains("niri") {
+            return "Niri output target"
+        }
+        if executable.contains("sway") {
+            return "Sway output target"
+        }
+        return "Compositor output target"
+    }
+
+    private func accentColor() -> NSColor {
+        let executable = configuration.compositorExecutable.map { URL(fileURLWithPath: $0).lastPathComponent.lowercased() } ?? ""
+        if executable.contains("niri") {
+            return NSColor(calibratedRed: 0.26, green: 0.76, blue: 0.56, alpha: 1.0)
+        }
+        if executable.contains("sway") {
+            return NSColor(calibratedRed: 0.32, green: 0.57, blue: 0.95, alpha: 1.0)
+        }
+        return NSColor(calibratedRed: 0.83, green: 0.53, blue: 0.29, alpha: 1.0)
     }
 
     private func scheduleImageCaptureIfNeeded() {
