@@ -30,6 +30,7 @@ from wayland_capture import (
 
 
 KEYMAP_FORMAT_XKB_V1 = 1
+XKB_KEYCODE_OFFSET = 8
 BTN_LEFT = 0x110
 BTN_RIGHT = 0x111
 BTN_MIDDLE = 0x112
@@ -435,7 +436,8 @@ class InputSession:
     def key(self, keycode: int, pressed: bool) -> None:
         now = int(time.time() * 1000) & 0xFFFFFFFF
         state = KEY_PRESSED if pressed else KEY_RELEASED
-        self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(keycode) + pack_u32(state))
+        xkb_keycode = keycode + XKB_KEYCODE_OFFSET
+        self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(xkb_keycode) + pack_u32(state))
 
 
 class InteractiveViewer:
@@ -519,7 +521,7 @@ class InteractiveViewer:
             except Exception as err:
                 self.capture_failed = str(err)
                 log_event(f"capture.loop.error {err}")
-            time.sleep(0.15)
+            time.sleep(0.016)
 
     def handle_motion(self, x: int, y: int, width: int, height: int) -> None:
         if self.input_session is None:
@@ -542,6 +544,7 @@ class InteractiveViewer:
             return
         keycode = map_key_event(keysym, code)
         if keycode is not None:
+            log_event(f"input.key {code or keysym} -> {keycode + XKB_KEYCODE_OFFSET} {'down' if pressed else 'up'}")
             self.input_session.key(keycode, pressed)
 
     def status_payload(self) -> dict[str, str | bool | None]:
@@ -652,19 +655,19 @@ class InteractiveViewer:
       event.preventDefault();
       send('wheel', {{delta: event.deltaY}});
     }}, {{passive: false}});
-    stage.addEventListener('keydown', (event) => {{
+    window.addEventListener('keydown', (event) => {{
       if (event.repeat) return;
       event.preventDefault();
       send('key', {{keysym: event.key, code: event.code, pressed: true}});
     }});
-    stage.addEventListener('keyup', (event) => {{
+    window.addEventListener('keyup', (event) => {{
       event.preventDefault();
       send('key', {{keysym: event.key, code: event.code, pressed: false}});
     }});
     refreshFrame();
     refreshStatus();
-    setInterval(refreshFrame, 150);
-    setInterval(refreshStatus, 400);
+    setInterval(refreshFrame, 16);
+    setInterval(refreshStatus, 200);
   </script>
 </body>
 </html>""".encode("utf-8")
