@@ -220,6 +220,10 @@ impl BridgeState {
         let window = self.windows.get_mut(&pid).ok_or("window not found")?;
         let stride = frame.width as i32 * 4;
         let size = (stride as usize) * (frame.height as usize);
+        eprintln!(
+            "macland-macos-bridge: update: win {}x{} frame {}x{}",
+            window.width, window.height, frame.width, frame.height
+        );
         if frame.pixels.len() != size {
             return Err("size mismatch".to_string());
         }
@@ -259,6 +263,16 @@ struct WindowFrame {
     width: u32,
     height: u32,
     pixels: Vec<u8>,
+}
+
+#[cfg(target_os = "macos")]
+fn resize_macos_window(pid: u32, width: u32, height: u32) {
+    use std::process::Command;
+    let script = format!(
+        "tell application \"System Events\"\nset p to first process whose id is {}\nset size of first window of p to {{{}, {}}}\nend tell",
+        pid, width, height
+    );
+    let _ = Command::new("osascript").args(["-e", &script]).output();
 }
 
 #[cfg(target_os = "macos")]
@@ -441,10 +455,18 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
     ) {
         match event {
             xdg_toplevel::Event::Configure { width, height, .. } => {
-                for w in _state.windows.values_mut() {
+                for (pid, w) in _state.windows.iter_mut() {
                     if w.xdg_toplevel == *toplevel && width > 0 && height > 0 {
-                        w.width = width as u32;
-                        w.height = height as u32;
+                        let new_width = width as u32;
+                        let new_height = height as u32;
+                        eprintln!(
+                            "macland-macos-bridge: configure: {}x{} (was {}x{})",
+                            new_width, new_height, w.width, w.height
+                        );
+                        // Resize the macOS window to match
+                        resize_macos_window(*pid, new_width, new_height);
+                        w.width = new_width;
+                        w.height = new_height;
                         // Commit to apply the new size
                         w.surface.commit();
                     }
