@@ -724,6 +724,18 @@ class InteractiveViewer:
                 if self.input_session is not None:
                     self.ensure_focus()
                 log_event("capture.loop.ready")
+            except FileNotFoundError as err:
+                self.capture_failed = str(err)
+                log_event(f"capture.loop.stopping missing-runtime {err}")
+                self.stop_event.set()
+                break
+            except CaptureError as err:
+                self.capture_failed = str(err)
+                if "wayland socket closed" in str(err).lower():
+                    log_event(f"capture.loop.stopping socket-closed {err}")
+                    self.stop_event.set()
+                    break
+                log_event(f"capture.loop.error {err}")
             except Exception as err:
                 self.capture_failed = str(err)
                 log_event(f"capture.loop.error {err}")
