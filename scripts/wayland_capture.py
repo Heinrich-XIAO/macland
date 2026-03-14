@@ -471,7 +471,10 @@ def write_png(path: Path, info: BufferInfo, raw: bytes, flags: int) -> None:
             chunk(b"IEND", b""),
         ]
     )
-    path.write_bytes(png)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_bytes(png)
+    os.replace(temp_path, path)
 
 
 def main(argv: list[str]) -> int:
