@@ -4,11 +4,12 @@ members = [
     "crates/macland-cli",
     "crates/macland-reference-client",
     "crates/macland-meta",
+    "crates/macland-macos-bridge",
 ]
 default-members = ["crates/macland-meta"]
 resolver = "2"
 
 [workspace.package]
-edition = "2024"
+edition = "2021"
 license = "MIT"
 version = "0.1.0"
