@@ -5,7 +5,7 @@ build_system = "meson"
 configure = ["meson", "setup", "build", "--reconfigure", "-Dwlroots:backends=x11", "-Dwlroots:session=disabled", "-Dwlroots:libliftoff=disabled", "-Dwlroots:xwayland=disabled", "-Dwlroots:color-management=disabled", "-Dwlroots:allocators=[]", "-Dwlroots:renderers=[]"]
 build = ["meson", "compile", "-C", "build"]
 test = ["meson", "test", "-C", "build"]
-entrypoint = ["./build/labwc"]
+entrypoint = ["./build/labwc", "--config", "../../../overrides/labwc/rc.xml"]
 patch_policy = "compatibility-lane"
 sdk_features = ["metal-fast-path", "seat-v1", "event-queue-v1"]
 protocol_expectations = ["xdg-shell", "layer-shell"]
