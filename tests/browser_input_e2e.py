@@ -38,19 +38,55 @@ class BrowserInputE2E(unittest.TestCase):
             url = self.wait_for_server_url()
             self.post_input(
                 url,
-                {"type": "key", "keysym": "Alt", "code": "AltLeft", "pressed": True},
+                {
+                    "type": "key",
+                    "keysym": "Alt",
+                    "code": "AltLeft",
+                    "pressed": True,
+                    "altKey": True,
+                    "ctrlKey": False,
+                    "metaKey": False,
+                    "shiftKey": False,
+                },
             )
             self.post_input(
                 url,
-                {"type": "key", "keysym": "Enter", "code": "Enter", "pressed": True},
+                {
+                    "type": "key",
+                    "keysym": "Enter",
+                    "code": "Enter",
+                    "pressed": True,
+                    "altKey": True,
+                    "ctrlKey": False,
+                    "metaKey": False,
+                    "shiftKey": False,
+                },
             )
             self.post_input(
                 url,
-                {"type": "key", "keysym": "Enter", "code": "Enter", "pressed": False},
+                {
+                    "type": "key",
+                    "keysym": "Enter",
+                    "code": "Enter",
+                    "pressed": False,
+                    "altKey": True,
+                    "ctrlKey": False,
+                    "metaKey": False,
+                    "shiftKey": False,
+                },
             )
             self.post_input(
                 url,
-                {"type": "key", "keysym": "Alt", "code": "AltLeft", "pressed": False},
+                {
+                    "type": "key",
+                    "keysym": "Alt",
+                    "code": "AltLeft",
+                    "pressed": False,
+                    "altKey": False,
+                    "ctrlKey": False,
+                    "metaKey": False,
+                    "shiftKey": False,
+                },
             )
 
             log_text = self.wait_for_log_lines(

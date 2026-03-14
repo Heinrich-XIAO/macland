@@ -207,6 +207,8 @@ BROWSER_CODE_TO_EVDEV = {
     "MetaRight": 126,
 }
 
+MODIFIER_KEYCODES = {29, 42, 54, 56, 97, 100, 125, 126}
+
 
 class InteractiveError(RuntimeError):
     pass
@@ -393,6 +395,7 @@ class InputSession:
         roundtrip(self.conn)
         log_event("input.keymap")
         self._install_keymap(default_keymap_text())
+        self.active_modifiers: set[int] = set()
         log_event("input.ready")
 
     def close(self) -> None:
@@ -449,6 +452,13 @@ class InputSession:
         state = KEY_PRESSED if pressed else KEY_RELEASED
         xkb_keycode = keycode + XKB_KEYCODE_OFFSET
         self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(xkb_keycode) + pack_u32(state))
+
+    def sync_modifiers(self, desired_modifiers: set[int]) -> None:
+        for keycode in sorted(self.active_modifiers - desired_modifiers):
+            self.key(keycode, False)
+        for keycode in sorted(desired_modifiers - self.active_modifiers):
+            self.key(keycode, True)
+        self.active_modifiers = set(desired_modifiers)
 
 
 class InteractiveViewer:
@@ -558,13 +568,27 @@ class InteractiveViewer:
         if delta:
             self.input_session.axis(1, float(-delta) / 120.0, int(-delta / 120))
 
-    def handle_key(self, keysym: str, code: str, pressed: bool) -> None:
+    def handle_key(
+        self,
+        keysym: str,
+        code: str,
+        pressed: bool,
+        modifiers: dict[str, bool] | None = None,
+    ) -> None:
         if self.input_session is None:
             return
+        desired_modifiers = modifier_keycodes_from_state(modifiers or {})
         keycode = map_key_event(keysym, code)
         if keycode is not None:
+            if keycode not in MODIFIER_KEYCODES:
+                self.input_session.sync_modifiers(desired_modifiers)
             log_event(f"input.key {code or keysym} -> {keycode + XKB_KEYCODE_OFFSET} {'down' if pressed else 'up'}")
             self.input_session.key(keycode, pressed)
+            if keycode in MODIFIER_KEYCODES:
+                if pressed:
+                    self.input_session.active_modifiers.add(keycode)
+                else:
+                    self.input_session.active_modifiers.discard(keycode)
 
     def status_payload(self) -> dict[str, str | bool | None]:
         return {
@@ -677,11 +701,27 @@ class InteractiveViewer:
     window.addEventListener('keydown', (event) => {{
       if (event.repeat) return;
       event.preventDefault();
-      send('key', {{keysym: event.key, code: event.code, pressed: true}});
+      send('key', {{
+        keysym: event.key,
+        code: event.code,
+        pressed: true,
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey
+      }});
     }});
     window.addEventListener('keyup', (event) => {{
       event.preventDefault();
-      send('key', {{keysym: event.key, code: event.code, pressed: false}});
+      send('key', {{
+        keysym: event.key,
+        code: event.code,
+        pressed: false,
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey
+      }});
     }});
     refreshFrame();
     refreshStatus();
@@ -755,6 +795,12 @@ class InteractiveViewer:
                         str(payload.get("keysym", "")),
                         str(payload.get("code", "")),
                         bool(payload.get("pressed")),
+                        {
+                            "altKey": bool(payload.get("altKey")),
+                            "ctrlKey": bool(payload.get("ctrlKey")),
+                            "metaKey": bool(payload.get("metaKey")),
+                            "shiftKey": bool(payload.get("shiftKey")),
+                        },
                     )
                 self.send_response(204)
                 self.end_headers()
@@ -802,6 +848,19 @@ def map_key_event(keysym: str, code: str) -> int | None:
         if mapped is not None:
             return mapped
     return map_keysym(keysym)
+
+
+def modifier_keycodes_from_state(modifiers: dict[str, bool]) -> set[int]:
+    result: set[int] = set()
+    if modifiers.get("altKey"):
+        result.add(56)
+    if modifiers.get("ctrlKey"):
+        result.add(29)
+    if modifiers.get("metaKey"):
+        result.add(125)
+    if modifiers.get("shiftKey"):
+        result.add(42)
+    return result
 
 
 def main(argv: list[str]) -> int:
