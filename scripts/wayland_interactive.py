@@ -651,12 +651,27 @@ class InteractiveViewer:
     const status = document.getElementById('status');
     const stage = document.getElementById('stage');
     const screen = document.getElementById('screen');
+    let failedHeartbeats = 0;
+    let closedForShutdown = false;
+    function handleServerShutdown() {{
+      if (closedForShutdown) return;
+      closedForShutdown = true;
+      status.textContent = 'macland host exited, closing tab…';
+      setTimeout(() => {{
+        window.close();
+        setTimeout(() => {{
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#101114;color:#f1f3f5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">macland host exited. You can close this tab.</div>';
+        }}, 150);
+      }}, 50);
+    }}
     function refreshFrame() {{
+      if (closedForShutdown) return;
       screen.src = '/frame.png?ts=' + Date.now();
     }}
     async function refreshStatus() {{
       try {{
         const response = await fetch('/status');
+        failedHeartbeats = 0;
         const payload = await response.json();
         if (payload.capture_failed) {{
           status.textContent = 'capture: ' + payload.capture_failed;
@@ -666,6 +681,11 @@ class InteractiveViewer:
           status.textContent = payload.frame_ready ? 'frame live, input attached' : 'waiting for first frame…';
         }}
       }} catch (_error) {{
+        failedHeartbeats += 1;
+        if (failedHeartbeats >= 3) {{
+          handleServerShutdown();
+          return;
+        }}
         status.textContent = 'waiting for host…';
       }}
     }}
