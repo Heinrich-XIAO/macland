@@ -883,6 +883,9 @@ def run_reference_client_capture(
 
 
 def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
+    app_bundle = prepare_host_app_bundle(workspace)
+    if app_bundle is not None:
+        return ["open", "-a", str(app_bundle), "--args", "--config", str(request_path)]
     candidates = [
         workspace / ".build" / "debug" / "macland-host",
         workspace / ".build" / "arm64-apple-macosx" / "debug" / "macland-host",
@@ -891,6 +894,38 @@ def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
         if candidate.exists():
             return [str(candidate), "--config", str(request_path)]
     return ["/usr/bin/swift", "run", "macland-host", "--config", str(request_path)]
+
+
+def prepare_host_app_bundle(workspace: Path) -> Path | None:
+    binary = workspace / ".build" / "debug" / "macland-host"
+    if not binary.exists():
+        return None
+    app_bundle = workspace / ".macland" / "host-app" / "MaclandHost.app"
+    contents = app_bundle / "Contents"
+    macos_dir = contents / "MacOS"
+    macos_dir.mkdir(parents=True, exist_ok=True)
+    info_plist = contents / "Info.plist"
+    info_plist.write_text(
+        "\n".join(
+            [
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+                "<plist version=\"1.0\">",
+                "<dict>",
+                "  <key>CFBundleExecutable</key><string>MaclandHost</string>",
+                "  <key>CFBundleIdentifier</key><string>local.macland.host</string>",
+                "  <key>CFBundleName</key><string>MaclandHost</string>",
+                "  <key>CFBundlePackageType</key><string>APPL</string>",
+                "  <key>LSBackgroundOnly</key><false/>",
+                "</dict>",
+                "</plist>",
+            ]
+        )
+    )
+    target = macos_dir / "MaclandHost"
+    shutil.copy2(binary, target)
+    target.chmod(0o755)
+    return app_bundle
 
 
 def wait_for_wayland_socket(runtime_dir: Path, timeout_seconds: float) -> str | None:
