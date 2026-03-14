@@ -159,7 +159,9 @@ def handle_repo(workspace: Path, args: list[str]) -> None:
         repo_root.mkdir(parents=True, exist_ok=True)
         source_root.mkdir(parents=True, exist_ok=True)
         write_repo_spec(workspace, spec)
-        manifest_path = seed_override_manifest(workspace, spec, overwrite_uninitialized=False)
+        manifest_path = seed_override_manifest(
+            workspace, spec, overwrite_uninitialized=False
+        )
         if manifest_path is None:
             manifest_path = write_manifest_template(workspace, spec)
         print(f"registered repo: {spec.repo_id}")
@@ -183,9 +185,15 @@ def handle_repo(workspace: Path, args: list[str]) -> None:
             if spec.rev:
                 run_checked(["git", "checkout", spec.rev], cwd=source_root)
 
-        run_checked(["git", "submodule", "update", "--init", "--recursive"], cwd=source_root)
-        manifest_path = seed_override_manifest(workspace, spec, overwrite_uninitialized=True)
-        for patch_path in sorted(override_patches_root(workspace, repo_id).glob("*.patch")):
+        run_checked(
+            ["git", "submodule", "update", "--init", "--recursive"], cwd=source_root
+        )
+        manifest_path = seed_override_manifest(
+            workspace, spec, overwrite_uninitialized=True
+        )
+        for patch_path in sorted(
+            override_patches_root(workspace, repo_id).glob("*.patch")
+        ):
             run_checked(["git", "apply", patch_path.as_posix()], cwd=source_root)
             print(f"applied override patch: {patch_path}")
 
@@ -201,7 +209,9 @@ def handle_repo(workspace: Path, args: list[str]) -> None:
 
 def run_bootstrap(workspace: Path, execute: bool) -> None:
     missing = [tool for tool in TOOLS if tool_missing(tool)]
-    packages = [BOOTSTRAP_PACKAGES[tool] for tool in missing if tool in BOOTSTRAP_PACKAGES]
+    packages = [
+        BOOTSTRAP_PACKAGES[tool] for tool in missing if tool in BOOTSTRAP_PACKAGES
+    ]
     if not packages:
         print("bootstrap: nothing to install")
         return
@@ -292,14 +302,21 @@ def print_inspect(workspace: Path, repo_id: str) -> None:
     run_record = load_action_record(reports_root, "run")
     print(f"repo: {manifest.repo_id}")
     print(f"buildable={str(bool(build_record and build_record['success'])).lower()}")
-    print(f"upstream_tests_pass={str(bool(test_record and test_record['success'])).lower()}")
+    print(
+        f"upstream_tests_pass={str(bool(test_record and test_record['success'])).lower()}"
+    )
     print("conformance_pass=false")
-    print(f"fullscreen_run_pass={str(bool(run_record and run_record['success'])).lower()}")
+    print(
+        f"fullscreen_run_pass={str(bool(run_record and run_record['success'])).lower()}"
+    )
     print(
         "tier="
         + (
             "Tier1"
-            if build_record and build_record["success"] and run_record and run_record["success"]
+            if build_record
+            and build_record["success"]
+            and run_record
+            and run_record["success"]
             else "Experimental"
         )
     )
@@ -330,7 +347,11 @@ def run_action(workspace: Path, repo_id: str, action: str, execute: bool) -> Non
     env.update(manifest.env)
     if "XDG_RUNTIME_DIR" not in env or not env["XDG_RUNTIME_DIR"]:
         env["XDG_RUNTIME_DIR"] = str(ensure_runtime_dir(repo_root))
-    if action == "build" and manifest.configure and manifest.build_system in {"meson", "cmake", "autotools"}:
+    if (
+        action == "build"
+        and manifest.configure
+        and manifest.build_system in {"meson", "cmake", "autotools"}
+    ):
         run_checked(manifest.configure, cwd=repo_root, env=env)
 
     cwd = repo_root
@@ -357,6 +378,7 @@ def run_test(workspace: Path, repo_id: str, args: list[str]) -> None:
 
 def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     execute = "--execute" in args
+    headless = "--headless" in args
     manifest = load_manifest(workspace, repo_id)
     source_root = source_dir(workspace, repo_id)
     mode = "fullscreen" if "--fullscreen" in args else "windowed-debug"
@@ -366,6 +388,8 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     print("command: " + " ".join(manifest.entrypoint))
     if image_path is not None:
         print(f"image: {image_path}")
+    if headless:
+        print("headless: true")
     if not execute:
         return
 
@@ -374,14 +398,23 @@ def run_launch(workspace: Path, repo_id: str, args: list[str]) -> None:
     run_root = source_root if source_root.exists() else workspace
     if image_path is not None:
         capture_compositor_image(workspace, manifest, run_root, image_path)
-        write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
+        write_action_record(
+            artifacts_dir(workspace, repo_id) / "reports",
+            "run",
+            True,
+            manifest.entrypoint,
+        )
         return
     if should_use_preview_fallback():
-        launch_interactive_window(workspace, manifest, run_root)
+        launch_interactive_window(workspace, manifest, run_root, headless=headless)
     else:
-        artifacts = create_host_launch_request(workspace, manifest, run_root, mode, image_path)
+        artifacts = create_host_launch_request(
+            workspace, manifest, run_root, mode, image_path
+        )
         launch_host(workspace, artifacts)
-    write_action_record(artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint)
+    write_action_record(
+        artifacts_dir(workspace, repo_id) / "reports", "run", True, manifest.entrypoint
+    )
 
 
 def infer_repo_id(url: str) -> str:
@@ -483,7 +516,9 @@ def write_manifest_template(workspace: Path, spec: RepoSpec) -> Path:
     return path
 
 
-def seed_override_manifest(workspace: Path, spec: RepoSpec, overwrite_uninitialized: bool) -> Path | None:
+def seed_override_manifest(
+    workspace: Path, spec: RepoSpec, overwrite_uninitialized: bool
+) -> Path | None:
     override_path = override_manifest_path(workspace, spec.repo_id)
     if not override_path.exists():
         return None
@@ -492,17 +527,29 @@ def seed_override_manifest(workspace: Path, spec: RepoSpec, overwrite_uninitiali
         return None
     if repo_manifest.exists() and overwrite_uninitialized:
         current = load_manifest(workspace, spec.repo_id)
-        if current.build_system != "custom" or current.build or current.test or current.entrypoint:
+        if (
+            current.build_system != "custom"
+            or current.build
+            or current.test
+            or current.entrypoint
+        ):
             return None
     repo_manifest.write_text(override_path.read_text())
     return repo_manifest
 
 
-def maybe_autodetect_manifest(workspace: Path, spec: RepoSpec, source_root: Path) -> None:
+def maybe_autodetect_manifest(
+    workspace: Path, spec: RepoSpec, source_root: Path
+) -> None:
     repo_manifest = repo_dir(workspace, spec.repo_id) / "macland.toml"
     if repo_manifest.exists():
         manifest = load_manifest(workspace, spec.repo_id)
-        if manifest.build_system != "custom" or manifest.build or manifest.test or manifest.entrypoint:
+        if (
+            manifest.build_system != "custom"
+            or manifest.build
+            or manifest.test
+            or manifest.entrypoint
+        ):
             return
     detected = autodetect_manifest(spec, source_root)
     if detected is None:
@@ -520,7 +567,10 @@ def autodetect_manifest(spec: RepoSpec, source_root: Path) -> Manifest | None:
         if package_name:
             entrypoint.extend(["--bin", package_name])
         return Manifest(
-            repo_id, repo, rev, "cargo",
+            repo_id,
+            repo,
+            rev,
+            "cargo",
             ["cargo", "fetch"],
             ["cargo", "build"],
             ["cargo", "test"],
@@ -534,7 +584,10 @@ def autodetect_manifest(spec: RepoSpec, source_root: Path) -> Manifest | None:
         project_name = read_meson_project_name(source_root / "meson.build")
         entrypoint = [f"./build/{project_name}"] if project_name else []
         return Manifest(
-            repo_id, repo, rev, "meson",
+            repo_id,
+            repo,
+            rev,
+            "meson",
             ["meson", "setup", "build", "--reconfigure"],
             ["meson", "compile", "-C", "build"],
             ["meson", "test", "-C", "build"],
@@ -546,7 +599,10 @@ def autodetect_manifest(spec: RepoSpec, source_root: Path) -> Manifest | None:
         )
     if (source_root / "CMakeLists.txt").exists():
         return Manifest(
-            repo_id, repo, rev, "cmake",
+            repo_id,
+            repo,
+            rev,
+            "cmake",
             ["cmake", "-S", ".", "-B", "build"],
             ["cmake", "--build", "build"],
             ["ctest", "--test-dir", "build"],
@@ -558,7 +614,10 @@ def autodetect_manifest(spec: RepoSpec, source_root: Path) -> Manifest | None:
         )
     if (source_root / "Makefile").exists():
         return Manifest(
-            repo_id, repo, rev, "make",
+            repo_id,
+            repo,
+            rev,
+            "make",
             [],
             ["make"],
             ["make", "test"],
@@ -621,7 +680,9 @@ def ensure_wlroots_redirect_wraps(source_root: Path) -> None:
         redirect_path = root_subprojects / wrap.name
         if redirect_path.exists():
             continue
-        redirect_path.write_text(f"[wrap-redirect]\nfilename = wlroots/subprojects/{wrap.name}\n")
+        redirect_path.write_text(
+            f"[wrap-redirect]\nfilename = wlroots/subprojects/{wrap.name}\n"
+        )
 
 
 def workspace_command_env(workspace: Path) -> dict[str, str]:
@@ -632,6 +693,7 @@ def workspace_command_env(workspace: Path) -> dict[str, str]:
     lib_dir = sysroot / "lib"
     include_dir = sysroot / "include"
     share_dir = sysroot / "share" / "pkgconfig"
+
     def merge_path(extra: list[str], existing: str) -> str:
         values = [value for value in [*extra, existing] if value]
         return ":".join(values)
@@ -676,7 +738,13 @@ def workspace_command_env(workspace: Path) -> dict[str, str]:
 
     env["PKG_CONFIG_PATH"] = merge_path(pkg_paths, env.get("PKG_CONFIG_PATH", ""))
     env["CMAKE_PREFIX_PATH"] = merge_path(
-        [str(sysroot), "/opt/homebrew", "/opt/homebrew/opt/libxkbcommon", "/opt/homebrew/opt/mesa", "/usr/local"],
+        [
+            str(sysroot),
+            "/opt/homebrew",
+            "/opt/homebrew/opt/libxkbcommon",
+            "/opt/homebrew/opt/mesa",
+            "/usr/local",
+        ],
         env.get("CMAKE_PREFIX_PATH", ""),
     )
     env["LIBRARY_PATH"] = merge_path(library_paths, env.get("LIBRARY_PATH", ""))
@@ -702,7 +770,9 @@ def workspace_command_env(workspace: Path) -> dict[str, str]:
         if value
     )
     env["CFLAGS"] = compile_flags
-    env["CXXFLAGS"] = " ".join(value for value in [compile_flags, env.get("CXXFLAGS", "")] if value)
+    env["CXXFLAGS"] = " ".join(
+        value for value in [compile_flags, env.get("CXXFLAGS", "")] if value
+    )
     env["LDFLAGS"] = " ".join(
         value
         for value in [
@@ -770,7 +840,9 @@ def create_host_launch_request(
     )
 
 
-def create_image_capture_artifacts(workspace: Path, repo_id: str, image_path: Path) -> ImageCaptureArtifacts:
+def create_image_capture_artifacts(
+    workspace: Path, repo_id: str, image_path: Path
+) -> ImageCaptureArtifacts:
     artifacts_root = artifacts_dir(workspace, repo_id) / "run"
     artifacts_root.mkdir(parents=True, exist_ok=True)
     runtime_dir = artifacts_root / "runtime"
@@ -813,8 +885,16 @@ def should_use_preview_fallback() -> bool:
     return platform.system().lower() == "darwin"
 
 
-def launch_interactive_window(workspace: Path, manifest: Manifest, run_root: Path) -> None:
-    image_path = (artifacts_dir(workspace, manifest.repo_id) / "run" / "live-preview.png").resolve()
+def launch_interactive_window(
+    workspace: Path,
+    manifest: Manifest,
+    run_root: Path,
+    *,
+    headless: bool = False,
+) -> None:
+    image_path = (
+        artifacts_dir(workspace, manifest.repo_id) / "run" / "live-preview.png"
+    ).resolve()
     artifacts = create_image_capture_artifacts(workspace, manifest.repo_id, image_path)
     binary, *arguments = manifest.entrypoint
     command = [str(resolve_binary(run_root, binary)), *arguments]
@@ -823,12 +903,18 @@ def launch_interactive_window(workspace: Path, manifest: Manifest, run_root: Pat
     env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
     stdout_handle = artifacts.stdout_path.open("w")
     stderr_handle = artifacts.stderr_path.open("w")
-    process = subprocess.Popen(command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle)
+    process = subprocess.Popen(
+        command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle
+    )
     try:
-        socket_name = wait_for_wayland_socket(artifacts.runtime_dir, timeout_seconds=8.0)
+        socket_name = wait_for_wayland_socket(
+            artifacts.runtime_dir, timeout_seconds=8.0
+        )
         if socket_name is None:
             if process.poll() is not None:
-                raise CliError(render_compositor_failure(command, process.returncode, artifacts))
+                raise CliError(
+                    render_compositor_failure(command, process.returncode, artifacts)
+                )
             raise CliError("timed out waiting for compositor Wayland socket")
         interactive_env = os.environ.copy()
         interactive_env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
@@ -836,15 +922,22 @@ def launch_interactive_window(workspace: Path, manifest: Manifest, run_root: Pat
         interactive_env["MACLAND_INTERACTIVE_LOG"] = str(
             artifacts_dir(workspace, manifest.repo_id) / "run" / "interactive-host.log"
         )
-        run_checked(
+        interactive_command = [
+            sys.executable,
+            str(workspace / "scripts" / "wayland_interactive.py"),
+        ]
+        if headless:
+            interactive_command.append("--headless")
+        interactive_command.extend(
             [
-                sys.executable,
-                str(workspace / "scripts" / "wayland_interactive.py"),
                 str(artifacts.runtime_dir),
                 socket_name,
                 str(image_path),
                 f"macland - {manifest.repo_id}",
-            ],
+            ]
+        )
+        run_checked(
+            interactive_command,
             cwd=workspace,
             env=interactive_env,
         )
@@ -859,7 +952,9 @@ def launch_interactive_window(workspace: Path, manifest: Manifest, run_root: Pat
         sanitize_capture_logs(artifacts)
 
 
-def capture_compositor_image(workspace: Path, manifest: Manifest, run_root: Path, image_path: Path) -> None:
+def capture_compositor_image(
+    workspace: Path, manifest: Manifest, run_root: Path, image_path: Path
+) -> None:
     artifacts = create_image_capture_artifacts(workspace, manifest.repo_id, image_path)
     binary, *arguments = manifest.entrypoint
     command = [str(resolve_binary(run_root, binary)), *arguments]
@@ -868,12 +963,18 @@ def capture_compositor_image(workspace: Path, manifest: Manifest, run_root: Path
     env["XDG_RUNTIME_DIR"] = str(artifacts.runtime_dir)
     stdout_handle = artifacts.stdout_path.open("w")
     stderr_handle = artifacts.stderr_path.open("w")
-    process = subprocess.Popen(command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle)
+    process = subprocess.Popen(
+        command, cwd=run_root, env=env, stdout=stdout_handle, stderr=stderr_handle
+    )
     try:
-        socket_name = wait_for_wayland_socket(artifacts.runtime_dir, timeout_seconds=8.0)
+        socket_name = wait_for_wayland_socket(
+            artifacts.runtime_dir, timeout_seconds=8.0
+        )
         if socket_name is None:
             if process.poll() is not None:
-                raise CliError(render_compositor_failure(command, process.returncode, artifacts))
+                raise CliError(
+                    render_compositor_failure(command, process.returncode, artifacts)
+                )
             raise CliError("timed out waiting for compositor Wayland socket")
         time.sleep(0.35)
         run_reference_client_capture(workspace, artifacts, socket_name)
@@ -890,9 +991,14 @@ def capture_compositor_image(workspace: Path, manifest: Manifest, run_root: Path
         sanitize_capture_logs(artifacts)
 
 
-def render_compositor_failure(command: list[str], return_code: int | None, artifacts: ImageCaptureArtifacts) -> str:
+def render_compositor_failure(
+    command: list[str], return_code: int | None, artifacts: ImageCaptureArtifacts
+) -> str:
     parts = [f"compositor exited with status {return_code}: {' '.join(command)}"]
-    for label, path in [("stdout", artifacts.stdout_path), ("stderr", artifacts.stderr_path)]:
+    for label, path in [
+        ("stdout", artifacts.stdout_path),
+        ("stderr", artifacts.stderr_path),
+    ]:
         if path.exists():
             content = path.read_text(errors="ignore").strip()
             if content:
@@ -934,7 +1040,6 @@ def run_reference_client_capture(
     )
 
 
-
 def host_launch_command(workspace: Path, request_path: Path) -> list[str]:
     app_bundle = prepare_host_app_bundle(workspace)
     if app_bundle is not None:
@@ -961,9 +1066,9 @@ def prepare_host_app_bundle(workspace: Path) -> Path | None:
     info_plist.write_text(
         "\n".join(
             [
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-                "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
-                "<plist version=\"1.0\">",
+                '<?xml version="1.0" encoding="UTF-8"?>',
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+                '<plist version="1.0">',
                 "<dict>",
                 "  <key>CFBundleExecutable</key><string>MaclandHost</string>",
                 "  <key>CFBundleIdentifier</key><string>local.macland.host</string>",
@@ -985,7 +1090,11 @@ def wait_for_wayland_socket(runtime_dir: Path, timeout_seconds: float) -> str | 
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if runtime_dir.exists():
-            sockets = sorted(path for path in runtime_dir.rglob("*") if path.exists() and path.is_socket())
+            sockets = sorted(
+                path
+                for path in runtime_dir.rglob("*")
+                if path.exists() and path.is_socket()
+            )
             for socket in sockets:
                 if socket.name.startswith("wayland-"):
                     return socket.name
@@ -1048,10 +1157,14 @@ def run_checked(
         raise CliError(f"command failed with status {return_code}: {' '.join(command)}")
 
 
-def write_action_record(root: Path, action: str, success: bool, command: list[str]) -> None:
+def write_action_record(
+    root: Path, action: str, success: bool, command: list[str]
+) -> None:
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{action}.json"
-    path.write_text(json.dumps({"action": action, "success": success, "command": command}, indent=2))
+    path.write_text(
+        json.dumps({"action": action, "success": success, "command": command}, indent=2)
+    )
 
 
 def load_action_record(root: Path, action: str) -> dict[str, object] | None:
@@ -1075,7 +1188,9 @@ def print_help() -> None:
     print("  inspect <repo-id>")
     print("  build <repo-id> [--execute]")
     print("  test <repo-id> [--upstream] [--conformance] [--execute]")
-    print("  run <repo-id> [--fullscreen|--windowed-debug] [--image [path]] [--execute]")
+    print(
+        "  run <repo-id> [--fullscreen|--windowed-debug] [--headless] [--image [path]] [--execute]"
+    )
 
 
 if __name__ == "__main__":

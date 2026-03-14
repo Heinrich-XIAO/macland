@@ -230,12 +230,18 @@ class InteractiveHTTPServer(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address) -> None:  # type: ignore[override]
         exc_type, exc, _ = sys.exc_info()
-        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        if isinstance(
+            exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+        ):
             return
         super().handle_error(request, client_address)
 
 
-LOG_PATH: Path | None = Path(os.environ["MACLAND_INTERACTIVE_LOG"]) if "MACLAND_INTERACTIVE_LOG" in os.environ else None
+LOG_PATH: Path | None = (
+    Path(os.environ["MACLAND_INTERACTIVE_LOG"])
+    if "MACLAND_INTERACTIVE_LOG" in os.environ
+    else None
+)
 
 
 def log_event(message: str) -> None:
@@ -265,7 +271,11 @@ def load_xkbcommon() -> ctypes.CDLL:
     library.xkb_state_new.argtypes = [ctypes.c_void_p]
     library.xkb_state_new.restype = ctypes.c_void_p
     library.xkb_state_unref.argtypes = [ctypes.c_void_p]
-    library.xkb_state_update_key.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+    library.xkb_state_update_key.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_int,
+    ]
     library.xkb_state_update_key.restype = ctypes.c_int
     library.xkb_state_serialize_mods.argtypes = [ctypes.c_void_p, ctypes.c_int]
     library.xkb_state_serialize_mods.restype = ctypes.c_uint32
@@ -311,10 +321,18 @@ class XkbState:
     def update_key(self, xkb_keycode: int, pressed: bool) -> tuple[int, int, int, int]:
         direction = XKB_KEY_DOWN if pressed else XKB_KEY_UP
         XKBCOMMON.xkb_state_update_key(self.state, xkb_keycode, direction)
-        depressed = int(XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_DEPRESSED))
-        latched = int(XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_LATCHED))
-        locked = int(XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_LOCKED))
-        group = int(XKBCOMMON.xkb_state_serialize_layout(self.state, XKB_STATE_LAYOUT_EFFECTIVE))
+        depressed = int(
+            XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_DEPRESSED)
+        )
+        latched = int(
+            XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_LATCHED)
+        )
+        locked = int(
+            XKBCOMMON.xkb_state_serialize_mods(self.state, XKB_STATE_MODS_LOCKED)
+        )
+        group = int(
+            XKBCOMMON.xkb_state_serialize_layout(self.state, XKB_STATE_LAYOUT_EFFECTIVE)
+        )
         return depressed, latched, locked, group
 
 
@@ -348,7 +366,13 @@ class WaylandSocket:
     def destroy_id(self, object_id: int) -> None:
         self.interfaces.pop(object_id, None)
 
-    def send(self, object_id: int, opcode: int, payload: bytes = b"", fds: list[int] | None = None) -> None:
+    def send(
+        self,
+        object_id: int,
+        opcode: int,
+        payload: bytes = b"",
+        fds: list[int] | None = None,
+    ) -> None:
         size = 8 + len(payload)
         header = struct.pack("<II", object_id, (size << 16) | opcode)
         ancillary = []
@@ -382,9 +406,16 @@ class WaylandSocket:
                 self.sock.settimeout(None)
 
 
-def bind(conn: WaylandSocket, registry_id: int, name: int, interface_name: str, version: int) -> int:
+def bind(
+    conn: WaylandSocket, registry_id: int, name: int, interface_name: str, version: int
+) -> int:
     object_id = conn.new_id(interface_name)
-    payload = pack_u32(name) + pack_string(interface_name) + pack_u32(version) + pack_u32(object_id)
+    payload = (
+        pack_u32(name)
+        + pack_string(interface_name)
+        + pack_u32(version)
+        + pack_u32(object_id)
+    )
     conn.send(registry_id, 0, payload)
     return object_id
 
@@ -418,10 +449,16 @@ def discover_globals(conn: WaylandSocket) -> tuple[int, Globals]:
                 globals_found.seat_name = name
             elif iface_name == "wl_output" and globals_found.output_name is None:
                 globals_found.output_name = name
-            elif iface_name == "zwlr_virtual_pointer_manager_v1" and globals_found.pointer_manager_name is None:
+            elif (
+                iface_name == "zwlr_virtual_pointer_manager_v1"
+                and globals_found.pointer_manager_name is None
+            ):
                 globals_found.pointer_manager_name = name
                 globals_found.pointer_manager_version = version
-            elif iface_name == "zwp_virtual_keyboard_manager_v1" and globals_found.keyboard_manager_name is None:
+            elif (
+                iface_name == "zwp_virtual_keyboard_manager_v1"
+                and globals_found.keyboard_manager_name is None
+            ):
                 globals_found.keyboard_manager_name = name
                 globals_found.keyboard_manager_version = version
         elif interface == "wl_callback" and object_id == callback_id and opcode == 0:
@@ -454,9 +491,13 @@ class InputSession:
         if globals_found.seat_name is None:
             raise InteractiveError("compositor does not expose wl_seat")
         if globals_found.pointer_manager_name is None:
-            raise InteractiveError("compositor does not expose zwlr_virtual_pointer_manager_v1")
+            raise InteractiveError(
+                "compositor does not expose zwlr_virtual_pointer_manager_v1"
+            )
         if globals_found.keyboard_manager_name is None:
-            raise InteractiveError("compositor does not expose zwp_virtual_keyboard_manager_v1")
+            raise InteractiveError(
+                "compositor does not expose zwp_virtual_keyboard_manager_v1"
+            )
         seat_id = bind(self.conn, registry_id, globals_found.seat_name, "wl_seat", 7)
         pointer_manager_id = bind(
             self.conn,
@@ -473,9 +514,13 @@ class InputSession:
             min(1, globals_found.keyboard_manager_version),
         )
         self.pointer_id = self.conn.new_id("zwlr_virtual_pointer_v1")
-        self.conn.send(pointer_manager_id, 0, pack_u32(seat_id) + pack_u32(self.pointer_id))
+        self.conn.send(
+            pointer_manager_id, 0, pack_u32(seat_id) + pack_u32(self.pointer_id)
+        )
         self.keyboard_id = self.conn.new_id("zwp_virtual_keyboard_v1")
-        self.conn.send(keyboard_manager_id, 0, pack_u32(seat_id) + pack_u32(self.keyboard_id))
+        self.conn.send(
+            keyboard_manager_id, 0, pack_u32(seat_id) + pack_u32(self.keyboard_id)
+        )
         roundtrip(self.conn)
         log_event("input.keymap")
         self._install_keymap(self.keymap_text)
@@ -513,23 +558,35 @@ class InputSession:
         self.conn.send(
             self.pointer_id,
             1,
-            pack_u32(now) + pack_u32(max(0, x)) + pack_u32(max(0, y)) + pack_u32(max(1, width)) + pack_u32(max(1, height)),
+            pack_u32(now)
+            + pack_u32(max(0, x))
+            + pack_u32(max(0, y))
+            + pack_u32(max(1, width))
+            + pack_u32(max(1, height)),
         )
         self.conn.send(self.pointer_id, 4)
 
     def button(self, button: int, pressed: bool) -> None:
         now = int(time.time() * 1000) & 0xFFFFFFFF
         state = POINTER_BUTTON_PRESSED if pressed else POINTER_BUTTON_RELEASED
-        self.conn.send(self.pointer_id, 2, pack_u32(now) + pack_u32(button) + pack_u32(state))
+        self.conn.send(
+            self.pointer_id, 2, pack_u32(now) + pack_u32(button) + pack_u32(state)
+        )
         self.conn.send(self.pointer_id, 4)
 
     def axis(self, axis: int, value: float, discrete: int) -> None:
         now = int(time.time() * 1000) & 0xFFFFFFFF
         fixed = int(value * 256)
         self.conn.send(self.pointer_id, 5, pack_u32(0))
-        self.conn.send(self.pointer_id, 3, pack_u32(now) + pack_u32(axis) + pack_i32(fixed))
+        self.conn.send(
+            self.pointer_id, 3, pack_u32(now) + pack_u32(axis) + pack_i32(fixed)
+        )
         self.conn.send(self.pointer_id, 7, pack_u32(now) + pack_u32(axis))
-        self.conn.send(self.pointer_id, 8, pack_u32(now) + pack_u32(axis) + pack_i32(fixed) + pack_i32(discrete))
+        self.conn.send(
+            self.pointer_id,
+            8,
+            pack_u32(now) + pack_u32(axis) + pack_i32(fixed) + pack_i32(discrete),
+        )
         self.conn.send(self.pointer_id, 4)
 
     def key(self, keycode: int, pressed: bool) -> None:
@@ -537,12 +594,19 @@ class InputSession:
         state = KEY_PRESSED if pressed else KEY_RELEASED
         xkb_keycode = keycode + XKB_KEYCODE_OFFSET
         # zwp_virtual_keyboard_v1 expects evdev keycodes (no XKB offset).
-        self.conn.send(self.keyboard_id, 1, pack_u32(now) + pack_u32(keycode) + pack_u32(state))
-        depressed, latched, locked, group = self.xkb_state.update_key(xkb_keycode, pressed)
+        self.conn.send(
+            self.keyboard_id, 1, pack_u32(now) + pack_u32(keycode) + pack_u32(state)
+        )
+        depressed, latched, locked, group = self.xkb_state.update_key(
+            xkb_keycode, pressed
+        )
         self.conn.send(
             self.keyboard_id,
             2,
-            pack_u32(depressed) + pack_u32(latched) + pack_u32(locked) + pack_u32(group),
+            pack_u32(depressed)
+            + pack_u32(latched)
+            + pack_u32(locked)
+            + pack_u32(group),
         )
 
     def sync_modifiers(self, desired_modifiers: set[int]) -> None:
@@ -554,12 +618,20 @@ class InputSession:
 
 
 class InteractiveViewer:
-    def __init__(self, image_path: Path, runtime_dir: str, display_name: str, title: str) -> None:
+    def __init__(
+        self,
+        image_path: Path,
+        runtime_dir: str,
+        display_name: str,
+        title: str,
+        headless: bool = False,
+    ) -> None:
         log_event("viewer.init")
         self.image_path = image_path
         self.runtime_dir = runtime_dir
         self.display_name = display_name
         self.title = title
+        self.headless = headless
         self.stop_event = threading.Event()
         self.closed = False
         self.capture_failed: str | None = None
@@ -588,15 +660,20 @@ class InteractiveViewer:
         self.capture_thread = threading.Thread(target=self.capture_loop, daemon=True)
         self.capture_thread.start()
         log_event("capture.thread.started")
-        self.input_thread = threading.Thread(target=self.init_input_session, daemon=True)
+        self.input_thread = threading.Thread(
+            target=self.init_input_session, daemon=True
+        )
         self.input_thread.start()
         log_event("input.thread.started")
 
     def run(self) -> int:
         signal.signal(signal.SIGTERM, lambda *_args: self.close())
         signal.signal(signal.SIGINT, lambda *_args: self.close())
-        subprocess.Popen(["open", self.base_url])
-        log_event("viewer.browser.opened")
+        if self.headless:
+            log_event("viewer.browser.skipped headless")
+        else:
+            subprocess.Popen(["open", self.base_url])
+            log_event("viewer.browser.opened")
         while not self.stop_event.is_set():
             self.server.handle_request()
         return 0
@@ -617,7 +694,10 @@ class InteractiveViewer:
         except Exception:
             pass
         current = threading.current_thread()
-        for thread in (getattr(self, "capture_thread", None), getattr(self, "input_thread", None)):
+        for thread in (
+            getattr(self, "capture_thread", None),
+            getattr(self, "input_thread", None),
+        ):
             if thread is not None and thread.is_alive() and thread is not current:
                 thread.join(timeout=1)
 
@@ -680,7 +760,9 @@ class InteractiveViewer:
         if keycode is not None:
             if keycode not in MODIFIER_KEYCODES:
                 self.input_session.sync_modifiers(desired_modifiers)
-            log_event(f"input.key {code or keysym} -> {keycode} {'down' if pressed else 'up'}")
+            log_event(
+                f"input.key {code or keysym} -> {keycode} {'down' if pressed else 'up'}"
+            )
             self.input_session.key(keycode, pressed)
             if keycode in MODIFIER_KEYCODES:
                 if pressed:
@@ -704,7 +786,11 @@ class InteractiveViewer:
             return
 
     def ensure_focus(self) -> None:
-        if self.focus_sent or self.input_session is None or self.last_frame_size is None:
+        if (
+            self.focus_sent
+            or self.input_session is None
+            or self.last_frame_size is None
+        ):
             return
         width, height = self.last_frame_size
         if width <= 0 or height <= 0:
@@ -723,7 +809,9 @@ class InteractiveViewer:
         }
 
     def html_page(self) -> bytes:
-        title = self.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        title = (
+            self.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
         return f"""<!doctype html>
 <html>
 <head>
@@ -939,8 +1027,15 @@ class InteractiveViewer:
                         int(payload.get("height", 1)),
                     )
                 elif event_type == "button":
-                    buttons = {"left": BTN_LEFT, "middle": BTN_MIDDLE, "right": BTN_RIGHT}
-                    host.handle_button(buttons.get(str(payload.get("button", "left")), BTN_LEFT), bool(payload.get("pressed")))
+                    buttons = {
+                        "left": BTN_LEFT,
+                        "middle": BTN_MIDDLE,
+                        "right": BTN_RIGHT,
+                    }
+                    host.handle_button(
+                        buttons.get(str(payload.get("button", "left")), BTN_LEFT),
+                        bool(payload.get("pressed")),
+                    )
                 elif event_type == "wheel":
                     host.handle_mousewheel(float(payload.get("delta", 0)))
                 elif event_type == "key":
@@ -1018,18 +1113,25 @@ def modifier_keycodes_from_state(modifiers: dict[str, bool]) -> set[int]:
 
 def main(argv: list[str]) -> int:
     log_event("main.entry")
-    if len(argv) != 5:
+    args = list(argv[1:])
+    headless = False
+    if "--headless" in args:
+        args.remove("--headless")
+        headless = True
+    if len(args) != 4:
         print(
-            "usage: wayland_interactive.py <runtime-dir> <wayland-display> <image.png> <title>",
+            "usage: wayland_interactive.py [--headless] <runtime-dir> <wayland-display> <image.png> <title>",
             file=sys.stderr,
         )
         return 1
-    runtime_dir = argv[1]
-    display_name = argv[2]
-    image_path = Path(argv[3]).resolve()
-    title = argv[4]
+    runtime_dir = args[0]
+    display_name = args[1]
+    image_path = Path(args[2]).resolve()
+    title = args[3]
     try:
-        viewer = InteractiveViewer(image_path, runtime_dir, display_name, title)
+        viewer = InteractiveViewer(
+            image_path, runtime_dir, display_name, title, headless=headless
+        )
         return viewer.run()
     except (InteractiveError, CaptureError) as err:
         print(f"error: {err}", file=sys.stderr)
