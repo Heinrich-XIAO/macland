@@ -613,19 +613,35 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
                 format!("{} - {}", owner_name, window_name)
             };
 
-            windows.insert(
+            let candidate = MacWindow {
+                _pid: pid,
+                name: display_name.clone(),
+                title: window_name.clone(),
                 window_id,
-                MacWindow {
-                    _pid: pid,
-                    name: display_name,
-                    title: window_name,
-                    window_id,
-                    x,
-                    y,
-                    width,
-                    height,
-                },
-            );
+                x,
+                y,
+                width,
+                height,
+            };
+
+            match ax_resize::window_is_resizable(&candidate) {
+                Ok(true) => {}
+                Ok(false) => {
+                    eprintln!(
+                        "macland-macos-bridge: quartz skip {} non-resizable pid={} window_id={} owner={:?} title={:?}",
+                        index, pid, window_id, owner_name, window_name
+                    );
+                    continue;
+                }
+                Err(()) => {
+                    eprintln!(
+                        "macland-macos-bridge: quartz resizable-check failed {} pid={} window_id={} owner={:?} title={:?}; keeping window",
+                        index, pid, window_id, owner_name, window_name
+                    );
+                }
+            }
+
+            windows.insert(window_id, candidate);
         }
     } else {
         eprintln!("macland-macos-bridge: quartz copy_window_info returned none");
@@ -987,6 +1003,45 @@ mod ax_resize {
         }
     }
 
+    pub fn window_is_resizable(mac_window: &MacWindow) -> Result<bool, ()> {
+        let app = unsafe { AXUIElementCreateApplication(mac_window._pid as i32) };
+        let Some(app) = OwnedCFType::new(app.cast()) else {
+            return Err(());
+        };
+        let windows_attr = cf_string("AXWindows");
+        let windows = copy_attribute_value(app.as_ptr().cast(), windows_attr.as_ptr())?;
+        let count = unsafe { CFArrayGetCount(windows.as_ptr().cast()) };
+        let mut best_window: Option<AXUIElementRef> = None;
+        let mut best_score = i64::MIN;
+
+        for index in 0..count {
+            let element = unsafe { CFArrayGetValueAtIndex(windows.as_ptr().cast(), index) };
+            if element.is_null() {
+                continue;
+            }
+            let title = copy_string_attribute(element.cast(), "AXTitle").unwrap_or_default();
+            let position = copy_point_attribute(element.cast(), "AXPosition").unwrap_or_default();
+            let size = copy_size_attribute(element.cast(), "AXSize").unwrap_or_default();
+            let score = score_window(mac_window, &title, position, size);
+            if score > best_score {
+                best_score = score;
+                best_window = Some(element.cast());
+            }
+        }
+
+        let Some(window) = best_window else {
+            return Err(());
+        };
+        let size_attr = cf_string("AXSize");
+        let mut settable: u8 = 0;
+        let result =
+            unsafe { AXUIElementIsAttributeSettable(window, size_attr.as_ptr(), &mut settable) };
+        if result != AX_SUCCESS {
+            return Err(());
+        }
+        Ok(settable != 0)
+    }
+
     pub fn resize_window(mac_window: &MacWindow, width: u32, height: u32) -> Result<(), ()> {
         let app = unsafe { AXUIElementCreateApplication(mac_window._pid as i32) };
         let Some(app) = OwnedCFType::new(app.cast()) else {
@@ -1143,6 +1198,11 @@ mod ax_resize {
             element: AXUIElementRef,
             attribute: CFStringRef,
             value: *mut CFTypeRef,
+        ) -> AXError;
+        fn AXUIElementIsAttributeSettable(
+            element: AXUIElementRef,
+            attribute: CFStringRef,
+            settable: *mut u8,
         ) -> AXError;
         fn AXUIElementSetAttributeValue(
             element: AXUIElementRef,
