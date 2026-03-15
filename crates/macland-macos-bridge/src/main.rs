@@ -170,8 +170,8 @@ impl BridgeState {
         let pressed = state == 1;
         self.key_states.insert(key, pressed);
 
-        if let Some(window_id) = self.focused_window {
-            if let Some(mac_window) = self.cached_windows.get(&window_id) {
+        if let Some(pid) = self.focused_window {
+            if let Some(mac_window) = self.cached_windows.values().find(|w| w._pid == pid) {
                 #[cfg(target_os = "macos")]
                 {
                     if let Some(key_code) = wayland_key_to_cg_key(key) {
@@ -190,15 +190,6 @@ impl BridgeState {
     fn handle_mouse_motion(&mut self, time: u32, surface_x: i32, surface_y: i32) {
         self.mouse_x = surface_x;
         self.mouse_y = surface_y;
-
-        if let Some(window_id) = self.focused_window {
-            if let Some(mac_window) = self.cached_windows.get(&window_id) {
-                let mac_x = mac_window.x + surface_x;
-                let mac_y = mac_window.y + surface_y;
-                #[cfg(target_os = "macos")]
-                input::send_mouse_move(mac_x, mac_y);
-            }
-        }
     }
 
     fn handle_mouse_button(&mut self, time: u32, button: u32, state: u32) {
@@ -209,8 +200,8 @@ impl BridgeState {
             self.mouse_buttons &= !(1 << button);
         }
 
-        if let Some(window_id) = self.focused_window {
-            if let Some(mac_window) = self.cached_windows.get(&window_id) {
+        if let Some(pid) = self.focused_window {
+            if let Some(mac_window) = self.cached_windows.values().find(|w| w._pid == pid) {
                 let mac_x = mac_window.x + self.mouse_x;
                 let mac_y = mac_window.y + self.mouse_y;
                 #[cfg(target_os = "macos")]
@@ -226,13 +217,10 @@ impl BridgeState {
 
     fn handle_focus(&mut self, surface: Option<WlSurface>) {
         if let Some(surface) = surface {
-            for (window_id, window) in &self.windows {
+            for (pid, window) in &self.windows {
                 if window.surface == surface {
-                    self.focused_window = Some(*window_id);
-                    eprintln!(
-                        "macland-macos-bridge: focus changed to window {}",
-                        window_id
-                    );
+                    self.focused_window = Some(*pid);
+                    eprintln!("macland-macos-bridge: focus changed to window {}", pid);
                     return;
                 }
             }
@@ -266,25 +254,32 @@ impl BridgeState {
 
         let capture_start = std::time::Instant::now();
 
-        for window_id in self
+        let pids_in_cached: std::collections::HashSet<u32> =
+            self.cached_windows.values().map(|w| w._pid).collect();
+
+        for pid in self
             .windows
             .keys()
-            .filter(|w| !self.cached_windows.contains_key(w))
+            .filter(|p| !pids_in_cached.contains(p))
             .copied()
             .collect::<Vec<_>>()
         {
-            eprintln!("macland-macos-bridge: window {} closed", window_id);
-            self.windows.remove(&window_id);
+            eprintln!(
+                "macland-macos-bridge: process {} has no windows, closing",
+                pid
+            );
+            self.windows.remove(&pid);
         }
 
-        // Create windows for found processes
+        // Create windows for found processes - use PID as key to handle multi-window apps (like Alacritty tabs)
         for (window_id, mac_window) in &self.cached_windows {
-            if !self.windows.contains_key(window_id) {
+            let pid = mac_window._pid;
+            if !self.windows.contains_key(&pid) {
                 let initial_width = mac_window.width.max(1);
                 let initial_height = mac_window.height.max(1);
                 eprintln!(
                     "macland-macos-bridge: creating Wayland window: key={} mac_pid={} mac_window_id={} title={:?} mac_bounds={}x{}+{}+{} initial_wayland={}x{} configured=false",
-                    window_id,
+                    pid,
                     mac_window._pid,
                     mac_window.window_id,
                     mac_window.name,
@@ -307,7 +302,7 @@ impl BridgeState {
                 xdg_toplevel.set_min_size(400, 300);
                 surface.commit();
                 self.windows.insert(
-                    *window_id,
+                    pid,
                     WaylandWindow {
                         surface,
                         xdg_surface,
@@ -333,11 +328,11 @@ impl BridgeState {
             let mac_windows = &self.cached_windows;
 
             let _capture_start = std::time::Instant::now();
-            for (window_id, wayland_window) in &mut self.windows {
+            for (pid, wayland_window) in &mut self.windows {
                 if !wayland_window.configured {
                     eprintln!(
                         "macland-macos-bridge: skipping capture: key={} reason=not-configured wayland={}x{}",
-                        window_id, wayland_window.width, wayland_window.height
+                        pid, wayland_window.width, wayland_window.height
                     );
                     continue;
                 }
@@ -345,15 +340,15 @@ impl BridgeState {
                 if wayland_window.width < 100 || wayland_window.height < 100 {
                     eprintln!(
                         "macland-macos-bridge: skipping capture: key={} reason=too-small wayland={}x{}",
-                        window_id, wayland_window.width, wayland_window.height
+                        pid, wayland_window.width, wayland_window.height
                     );
                     continue;
                 }
-                // Get macOS window for capture
-                if let Some(mac_window) = mac_windows.get(window_id) {
+                // Get macOS window for capture - find one matching this PID
+                if let Some(mac_window) = mac_windows.values().find(|w| w._pid == *pid) {
                     eprintln!(
                         "macland-macos-bridge: capture request: key={} mac_pid={} mac_window_id={} mac_bounds={}x{}+{}+{} target_wayland={}x{} configured={}",
-                        window_id,
+                        pid,
                         mac_window._pid,
                         mac_window.window_id,
                         mac_window.width,
@@ -371,19 +366,19 @@ impl BridgeState {
                     ) {
                         eprintln!(
                             "macland-macos-bridge: capture success queued: key={} frame={}x{}",
-                            window_id, frame.width, frame.height
+                            pid, frame.width, frame.height
                         );
-                        result.push((*window_id, frame));
+                        result.push((*pid, frame));
                     } else {
                         eprintln!(
                             "macland-macos-bridge: capture returned none: key={} mac_window_id={}",
-                            window_id, mac_window.window_id
+                            pid, mac_window.window_id
                         );
                     }
                 } else {
                     eprintln!(
                         "macland-macos-bridge: no cached mac window for wayland key={}",
-                        window_id
+                        pid
                     );
                 }
             }
@@ -1063,6 +1058,7 @@ mod input {
     type CGEventTapLocation = u32;
     type CFMachPortRef = *mut c_void;
     type CGEventRef = *mut c_void;
+    type CGEventField = u32;
 
     const kCGHIDEventTap: CGEventTapLocation = 0;
     const kCGEventKeyDown: CGEventType = 0x0a;
@@ -1127,11 +1123,6 @@ mod input {
     }
 
     pub fn send_key_event(key_code: CGKeyCode, pressed: bool) {
-        let event_type = if pressed {
-            kCGEventKeyDown
-        } else {
-            kCGEventKeyUp
-        };
         unsafe {
             let event = CGEventCreateKeyboardEvent(ptr::null_mut(), key_code, pressed as u8);
             if !event.is_null() {
@@ -1141,26 +1132,10 @@ mod input {
         }
     }
 
-    pub fn send_mouse_move(x: i32, y: i32) {
-        unsafe {
-            let event = CGEventCreateMouseEvent(
-                ptr::null_mut(),
-                kCGEventMouseMoved,
-                CGPoint {
-                    x: x as f64,
-                    y: y as f64,
-                },
-                0,
-            );
-            if !event.is_null() {
-                CGEventPost(kCGHIDEventTap, event);
-                CFRelease(event.cast());
-            }
-        }
-    }
+    pub fn send_mouse_move(_x: i32, _y: i32) {}
 
     pub fn send_mouse_click(x: i32, y: i32, button: u32, pressed: bool) {
-        let event_type = match button {
+        let mouse_type = match button {
             0 => {
                 if pressed {
                     kCGEventLeftMouseDown
@@ -1180,7 +1155,7 @@ mod input {
         unsafe {
             let event = CGEventCreateMouseEvent(
                 ptr::null_mut(),
-                event_type,
+                mouse_type,
                 CGPoint {
                     x: x as f64,
                     y: y as f64,
