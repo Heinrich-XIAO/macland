@@ -74,6 +74,7 @@ fn run() -> Result<(), String> {
 struct MacWindow {
     _pid: u32,
     name: String,
+    title: String,
     window_id: u32,
     x: i32,
     y: i32,
@@ -452,13 +453,13 @@ struct WindowFrame {
 }
 
 #[cfg(target_os = "macos")]
-fn resize_macos_window(pid: u32, width: u32, height: u32) {
-    use std::process::Command;
-    let script = format!(
-        "tell application \"System Events\"\nset p to first process whose id is {}\nset size of first window of p to {{{}, {}}}\nend tell",
-        pid, width, height
-    );
-    let _ = Command::new("osascript").args(["-e", &script]).output();
+fn resize_macos_window(mac_window: &MacWindow, width: u32, height: u32) {
+    if ax_resize::resize_window(mac_window, width, height).is_err() {
+        eprintln!(
+            "macland-macos-bridge: accessibility resize failed: window_id={} pid={} target={}x{} title={:?}",
+            mac_window.window_id, mac_window._pid, width, height, mac_window.title
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -617,6 +618,7 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
                 MacWindow {
                     _pid: pid,
                     name: display_name,
+                    title: window_name,
                     window_id,
                     x,
                     y,
@@ -678,9 +680,18 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
             &color_space,
             bitmap_info,
         )?;
+        let source_width = image.width() as f64;
+        let source_height = image.height() as f64;
+        let target_width = width as f64;
+        let target_height = height as f64;
+        let scale = f64::min(target_width / source_width, target_height / source_height);
+        let fitted_width = (source_width * scale).max(1.0);
+        let fitted_height = (source_height * scale).max(1.0);
+        let offset_x = ((target_width - fitted_width) / 2.0).max(0.0);
+        let offset_y = ((target_height - fitted_height) / 2.0).max(0.0);
         let rect = CGRect::new(
-            &CGPoint::new(0.0, 0.0),
-            &CGSize::new(width as f64, height as f64),
+            &CGPoint::new(offset_x, offset_y),
+            &CGSize::new(fitted_width, fitted_height),
         );
         context.translate(0.0, height as f64);
         context.scale(1.0, -1.0);
@@ -690,14 +701,18 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
         let render_time = render_start.elapsed();
 
         eprintln!(
-            "macland-macos-bridge: capture: window_id={}, quartz={:?}, render={:?}, size={}x{} source={}x{}",
+            "macland-macos-bridge: capture: window_id={}, quartz={:?}, render={:?}, size={}x{} source={}x{} fitted={}x{} offset={}x{}",
             window_id,
             capture_time,
             render_time,
             width,
             height,
             image.width(),
-            image.height()
+            image.height(),
+            fitted_width as u32,
+            fitted_height as u32,
+            offset_x as u32,
+            offset_y as u32
         );
 
         return Some(WindowFrame {
@@ -916,6 +931,248 @@ mod quartz_capture {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod ax_resize {
+    use super::MacWindow;
+    use std::ffi::{c_char, c_void};
+    use std::ptr;
+
+    type CFIndex = isize;
+    type CFTypeRef = *const c_void;
+    type CFStringRef = *const c_void;
+    type CFArrayRef = *const c_void;
+    type AXUIElementRef = *const c_void;
+    type AXValueRef = *const c_void;
+    type AXError = i32;
+    type AXValueType = u32;
+
+    const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+    const K_AX_VALUE_CGPOINT_TYPE: AXValueType = 1;
+    const K_AX_VALUE_CGSIZE_TYPE: AXValueType = 2;
+    const AX_SUCCESS: AXError = 0;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct CGSize {
+        width: f64,
+        height: f64,
+    }
+
+    struct OwnedCFType(CFTypeRef);
+
+    impl OwnedCFType {
+        fn new(ptr: CFTypeRef) -> Option<Self> {
+            if ptr.is_null() {
+                None
+            } else {
+                Some(Self(ptr))
+            }
+        }
+
+        fn as_ptr(&self) -> CFTypeRef {
+            self.0
+        }
+    }
+
+    impl Drop for OwnedCFType {
+        fn drop(&mut self) {
+            unsafe { CFRelease(self.0) }
+        }
+    }
+
+    pub fn resize_window(mac_window: &MacWindow, width: u32, height: u32) -> Result<(), ()> {
+        let app = unsafe { AXUIElementCreateApplication(mac_window._pid as i32) };
+        let Some(app) = OwnedCFType::new(app.cast()) else {
+            return Err(());
+        };
+        let windows_attr = cf_string("AXWindows");
+        let windows = copy_attribute_value(app.as_ptr().cast(), windows_attr.as_ptr())?;
+        let count = unsafe { CFArrayGetCount(windows.as_ptr().cast()) };
+        let mut best_window: Option<AXUIElementRef> = None;
+        let mut best_score = i64::MIN;
+
+        for index in 0..count {
+            let element = unsafe { CFArrayGetValueAtIndex(windows.as_ptr().cast(), index) };
+            if element.is_null() {
+                continue;
+            }
+            let title = copy_string_attribute(element.cast(), "AXTitle").unwrap_or_default();
+            let position = copy_point_attribute(element.cast(), "AXPosition").unwrap_or_default();
+            let size = copy_size_attribute(element.cast(), "AXSize").unwrap_or_default();
+            let score = score_window(mac_window, &title, position, size);
+            if score > best_score {
+                best_score = score;
+                best_window = Some(element.cast());
+            }
+        }
+
+        let Some(window) = best_window else {
+            return Err(());
+        };
+        let size_attr = cf_string("AXSize");
+        let target_size = CGSize {
+            width: width as f64,
+            height: height as f64,
+        };
+        let size_value = unsafe {
+            AXValueCreate(
+                K_AX_VALUE_CGSIZE_TYPE,
+                (&target_size as *const CGSize).cast(),
+            )
+        };
+        let Some(size_value) = OwnedCFType::new(size_value.cast()) else {
+            return Err(());
+        };
+        let result = unsafe {
+            AXUIElementSetAttributeValue(window, size_attr.as_ptr(), size_value.as_ptr())
+        };
+        if result == AX_SUCCESS {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    fn score_window(mac_window: &MacWindow, title: &str, position: CGPoint, size: CGSize) -> i64 {
+        let mut score = 0i64;
+        if title == mac_window.title {
+            score += 10_000;
+        } else if title.is_empty() && mac_window.title.is_empty() {
+            score += 2_000;
+        }
+        score -= (position.x as i64 - mac_window.x as i64).abs();
+        score -= (position.y as i64 - mac_window.y as i64).abs();
+        score -= (size.width as i64 - mac_window.width as i64).abs() * 2;
+        score -= (size.height as i64 - mac_window.height as i64).abs() * 2;
+        score
+    }
+
+    fn copy_attribute_value(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+    ) -> Result<OwnedCFType, ()> {
+        let mut value: CFTypeRef = ptr::null();
+        let result = unsafe { AXUIElementCopyAttributeValue(element, attribute, &mut value) };
+        if result != AX_SUCCESS {
+            return Err(());
+        }
+        OwnedCFType::new(value).ok_or(())
+    }
+
+    fn copy_string_attribute(element: AXUIElementRef, attribute: &str) -> Option<String> {
+        let attribute = cf_string(attribute);
+        let value = copy_attribute_value(element, attribute.as_ptr()).ok()?;
+        cf_string_to_string(value.as_ptr())
+    }
+
+    fn copy_point_attribute(element: AXUIElementRef, attribute: &str) -> Option<CGPoint> {
+        let attribute = cf_string(attribute);
+        let value = copy_attribute_value(element, attribute.as_ptr()).ok()?;
+        let mut point = CGPoint::default();
+        let ok = unsafe {
+            AXValueGetValue(
+                value.as_ptr().cast(),
+                K_AX_VALUE_CGPOINT_TYPE,
+                (&mut point as *mut CGPoint).cast(),
+            )
+        };
+        if ok {
+            Some(point)
+        } else {
+            None
+        }
+    }
+
+    fn copy_size_attribute(element: AXUIElementRef, attribute: &str) -> Option<CGSize> {
+        let attribute = cf_string(attribute);
+        let value = copy_attribute_value(element, attribute.as_ptr()).ok()?;
+        let mut size = CGSize::default();
+        let ok = unsafe {
+            AXValueGetValue(
+                value.as_ptr().cast(),
+                K_AX_VALUE_CGSIZE_TYPE,
+                (&mut size as *mut CGSize).cast(),
+            )
+        };
+        if ok {
+            Some(size)
+        } else {
+            None
+        }
+    }
+
+    fn cf_string(raw: &str) -> OwnedCFType {
+        let bytes = std::ffi::CString::new(raw).expect("cstring");
+        let string = unsafe {
+            CFStringCreateWithCString(ptr::null(), bytes.as_ptr(), K_CF_STRING_ENCODING_UTF8)
+        };
+        OwnedCFType::new(string.cast()).expect("cfstring")
+    }
+
+    fn cf_string_to_string(value: CFTypeRef) -> Option<String> {
+        let length = unsafe { CFStringGetLength(value.cast()) };
+        let capacity = (length as usize * 4) + 1;
+        let mut buffer = vec![0u8; capacity];
+        let ok = unsafe {
+            CFStringGetCString(
+                value.cast(),
+                buffer.as_mut_ptr().cast::<c_char>(),
+                capacity as CFIndex,
+                K_CF_STRING_ENCODING_UTF8,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        let nul = buffer.iter().position(|b| *b == 0).unwrap_or(buffer.len());
+        String::from_utf8(buffer[..nul].to_vec()).ok()
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+        fn AXUIElementCopyAttributeValue(
+            element: AXUIElementRef,
+            attribute: CFStringRef,
+            value: *mut CFTypeRef,
+        ) -> AXError;
+        fn AXUIElementSetAttributeValue(
+            element: AXUIElementRef,
+            attribute: CFStringRef,
+            value: CFTypeRef,
+        ) -> AXError;
+        fn AXValueCreate(the_type: AXValueType, value_ptr: *const c_void) -> AXValueRef;
+        fn AXValueGetValue(
+            value: AXValueRef,
+            the_type: AXValueType,
+            value_ptr: *mut c_void,
+        ) -> bool;
+        fn CFRelease(value: CFTypeRef);
+        fn CFArrayGetCount(array: CFArrayRef) -> CFIndex;
+        fn CFArrayGetValueAtIndex(array: CFArrayRef, index: CFIndex) -> *const c_void;
+        fn CFStringCreateWithCString(
+            alloc: *const c_void,
+            c_str: *const c_char,
+            encoding: u32,
+        ) -> CFStringRef;
+        fn CFStringGetLength(the_string: CFStringRef) -> CFIndex;
+        fn CFStringGetCString(
+            the_string: CFStringRef,
+            buffer: *mut c_char,
+            buffer_size: CFIndex,
+            encoding: u32,
+        ) -> u8;
+    }
+}
+
 fn create_shm_file(size: usize) -> Result<File, String> {
     let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     let root = PathBuf::from(runtime_dir);
@@ -1060,8 +1317,9 @@ impl Dispatch<XdgToplevel, ()> for BridgeState {
                             );
                             continue;
                         }
-                        // Resize the macOS window to match using the owning process id.
-                        resize_macos_window(w.mac_pid, resolved_width, resolved_height);
+                        if let Some(mac_window) = _state.cached_windows.get(pid) {
+                            resize_macos_window(mac_window, resolved_width, resolved_height);
+                        }
                         w.width = resolved_width;
                         w.height = resolved_height;
                         // Commit to apply the new size
