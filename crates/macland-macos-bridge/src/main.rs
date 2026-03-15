@@ -706,11 +706,9 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
         let offset_x = ((target_width - fitted_width) / 2.0).max(0.0);
         let offset_y = ((target_height - fitted_height) / 2.0).max(0.0);
         let rect = CGRect::new(
-            &CGPoint::new(offset_x, offset_y),
+            &CGPoint::new(offset_x, height as f64 - offset_y - fitted_height),
             &CGSize::new(fitted_width, fitted_height),
         );
-        context.translate(0.0, height as f64);
-        context.scale(1.0, -1.0);
         context.set_interpolation_quality(K_CG_INTERPOLATION_QUALITY_HIGH);
         context.draw_image(rect, &image);
         context.flush();
