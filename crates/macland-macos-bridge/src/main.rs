@@ -85,11 +85,25 @@ struct WaylandWindow {
     surface: WlSurface,
     xdg_surface: XdgSurface,
     xdg_toplevel: XdgToplevel,
-    buffer: Option<WlBuffer>,
+    buffers: Option<WindowBuffers>,
     mac_pid: u32,
     width: u32,
     height: u32,
     configured: bool,
+}
+
+struct WindowBuffers {
+    backing: File,
+    width: u32,
+    height: u32,
+    slots: [WindowBufferSlot; 2],
+    next_slot: usize,
+}
+
+struct WindowBufferSlot {
+    buffer: WlBuffer,
+    offset: usize,
+    busy: bool,
 }
 
 struct BridgeState {
@@ -189,7 +203,7 @@ impl BridgeState {
                         surface,
                         xdg_surface,
                         xdg_toplevel,
-                        buffer: None,
+                        buffers: None,
                         mac_pid: mac_window._pid,
                         width: initial_width,
                         height: initial_height,
@@ -320,26 +334,33 @@ impl BridgeState {
             &frame.pixels[..4]
         );
 
-        let mut backing = create_shm_file(size)?;
-        backing
-            .write_all(&frame.pixels)
-            .map_err(|e| e.to_string())?;
-        backing
-            .seek(SeekFrom::Start(0))
-            .map_err(|e| e.to_string())?;
-        let pool = self.shm.create_pool(backing.as_fd(), size as i32, qh, ());
-        let buffer = pool.create_buffer(
-            0,
-            frame.width as i32,
-            frame.height as i32,
-            stride,
-            wl_shm::Format::Abgr8888,
-            qh,
-            (),
-        );
-        window.surface.attach(Some(&buffer), 0, 0);
-        window.surface.commit();
-        window.buffer = Some(buffer);
+        let surface = window.surface.clone();
+        let Some(slot_buffer) = ({
+            let buffers = ensure_window_buffers(window, &self.shm, frame.width, frame.height, qh)?;
+            let Some(slot_index) = next_available_slot(buffers) else {
+                eprintln!(
+                    "macland-macos-bridge: update skipped: key={} reason=no-free-buffer stored_wayland={}x{}",
+                    pid, window.width, window.height
+                );
+                return Ok(());
+            };
+            let slot_offset = buffers.slots[slot_index].offset;
+            let slot_buffer = buffers.slots[slot_index].buffer.clone();
+            buffers
+                .backing
+                .seek(SeekFrom::Start(slot_offset as u64))
+                .map_err(|e: std::io::Error| e.to_string())?;
+            buffers
+                .backing
+                .write_all(&frame.pixels)
+                .map_err(|e: std::io::Error| e.to_string())?;
+            buffers.slots[slot_index].busy = true;
+            Some(slot_buffer)
+        }) else {
+            return Ok(());
+        };
+        surface.attach(Some(&slot_buffer), 0, 0);
+        surface.commit();
         eprintln!(
             "macland-macos-bridge: update committed: key={} attached_buffer={}x{} stored_wayland={}x{}",
             pid,
@@ -350,6 +371,77 @@ impl BridgeState {
         );
         Ok(())
     }
+}
+
+fn ensure_window_buffers<'a>(
+    window: &'a mut WaylandWindow,
+    shm: &WlShm,
+    width: u32,
+    height: u32,
+    qh: &QueueHandle<BridgeState>,
+) -> Result<&'a mut WindowBuffers, String> {
+    let recreate = match &window.buffers {
+        Some(buffers) => buffers.width != width || buffers.height != height,
+        None => true,
+    };
+    if recreate {
+        let stride = width as i32 * 4;
+        let slot_len = (stride as usize) * (height as usize);
+        let total_size = slot_len * 2;
+        let backing = create_shm_file(total_size)?;
+        let pool = shm.create_pool(backing.as_fd(), total_size as i32, qh, ());
+        let first = pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride,
+            wl_shm::Format::Abgr8888,
+            qh,
+            (),
+        );
+        let second = pool.create_buffer(
+            slot_len as i32,
+            width as i32,
+            height as i32,
+            stride,
+            wl_shm::Format::Abgr8888,
+            qh,
+            (),
+        );
+        window.buffers = Some(WindowBuffers {
+            backing,
+            width,
+            height,
+            slots: [
+                WindowBufferSlot {
+                    buffer: first,
+                    offset: 0,
+                    busy: false,
+                },
+                WindowBufferSlot {
+                    buffer: second,
+                    offset: slot_len,
+                    busy: false,
+                },
+            ],
+            next_slot: 0,
+        });
+    }
+    window
+        .buffers
+        .as_mut()
+        .ok_or_else(|| "window buffers unavailable".to_string())
+}
+
+fn next_available_slot(buffers: &mut WindowBuffers) -> Option<usize> {
+    for offset in 0..buffers.slots.len() {
+        let index = (buffers.next_slot + offset) % buffers.slots.len();
+        if !buffers.slots[index].busy {
+            buffers.next_slot = (index + 1) % buffers.slots.len();
+            return Some(index);
+        }
+    }
+    None
 }
 
 #[derive(Clone)]
@@ -546,7 +638,12 @@ fn get_macos_windows() -> HashMap<u32, MacWindow> {
 
 #[cfg(target_os = "macos")]
 fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame> {
-    use std::process::Command;
+    use quartz_capture::{
+        cgrect_null, CGColorSpaceHandle, CGContextHandle, CGImageHandle, CGPoint, CGRect, CGSize,
+        K_CG_BITMAP_BYTE_ORDER32_BIG, K_CG_IMAGE_ALPHA_PREMULTIPLIED_LAST,
+        K_CG_INTERPOLATION_QUALITY_HIGH, K_CG_WINDOW_IMAGE_BOUNDS_IGNORE_FRAMING,
+        K_CG_WINDOW_IMAGE_NOMINAL_RESOLUTION, K_CG_WINDOW_LIST_OPTION_INCLUDING_WINDOW,
+    };
 
     if width < 10 || height < 10 {
         eprintln!(
@@ -558,65 +655,265 @@ fn capture_window(window_id: u32, width: u32, height: u32) -> Option<WindowFrame
 
     let capture_start = std::time::Instant::now();
 
-    // Capture specific window by ID
-    let output = Command::new("screencapture")
-        .args([
-            "-x",
-            "-o",
-            "-l",
-            &window_id.to_string(),
-            "/tmp/macland_capture.png",
-        ])
-        .output();
+    let image = CGImageHandle::window_image(
+        cgrect_null(),
+        K_CG_WINDOW_LIST_OPTION_INCLUDING_WINDOW,
+        window_id,
+        K_CG_WINDOW_IMAGE_BOUNDS_IGNORE_FRAMING | K_CG_WINDOW_IMAGE_NOMINAL_RESOLUTION,
+    );
+    let capture_time = capture_start.elapsed();
 
-    let screencapture_time = capture_start.elapsed();
-
-    if let Ok(output) = output {
-        if !output.status.success() {
-            eprintln!(
-                "macland-macos-bridge: capture failed for window {}: {:?}",
-                window_id,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return None;
-        }
-
-        let load_start = std::time::Instant::now();
-        let img = match image::open("/tmp/macland_capture.png") {
-            Ok(img) => img,
-            Err(e) => {
-                eprintln!(
-                    "macland-macos-bridge: image open failed for window {}: {}",
-                    window_id, e
-                );
-                return None;
-            }
-        };
-        let rgba = img.to_rgba8();
-        let (w, h) = rgba.dimensions();
-
-        let load_time = load_start.elapsed();
+    if let Some(image) = image {
+        let render_start = std::time::Instant::now();
+        let stride = width as usize * 4;
+        let mut pixels = vec![0; stride * height as usize];
+        let color_space = CGColorSpaceHandle::device_rgb()?;
+        let bitmap_info = K_CG_IMAGE_ALPHA_PREMULTIPLIED_LAST | K_CG_BITMAP_BYTE_ORDER32_BIG;
+        let context = CGContextHandle::bitmap_context(
+            pixels.as_mut_ptr().cast(),
+            width as usize,
+            height as usize,
+            8,
+            stride,
+            &color_space,
+            bitmap_info,
+        )?;
+        let rect = CGRect::new(
+            &CGPoint::new(0.0, 0.0),
+            &CGSize::new(width as f64, height as f64),
+        );
+        context.translate(0.0, height as f64);
+        context.scale(1.0, -1.0);
+        context.set_interpolation_quality(K_CG_INTERPOLATION_QUALITY_HIGH);
+        context.draw_image(rect, &image);
+        context.flush();
+        let render_time = render_start.elapsed();
 
         eprintln!(
-            "macland-macos-bridge: capture: window_id={}, screencapture={:?}, load={:?}, size={}x{}",
-            window_id, screencapture_time, load_time, w, h
+            "macland-macos-bridge: capture: window_id={}, quartz={:?}, render={:?}, size={}x{} source={}x{}",
+            window_id,
+            capture_time,
+            render_time,
+            width,
+            height,
+            image.width(),
+            image.height()
         );
 
-        if w > 0 && h > 0 {
-            return Some(WindowFrame {
-                width: w,
-                height: h,
-                pixels: rgba.into_raw(),
-            });
-        }
+        return Some(WindowFrame {
+            width,
+            height,
+            pixels,
+        });
     } else {
         eprintln!(
-            "macland-macos-bridge: screencapture command failed for window {}: {:?}",
-            window_id,
-            output.err()
+            "macland-macos-bridge: quartz capture failed for window {} after {:?}",
+            window_id, capture_time
         );
     }
     None
+}
+
+#[cfg(target_os = "macos")]
+mod quartz_capture {
+    use std::ffi::c_void;
+
+    pub const K_CG_WINDOW_LIST_OPTION_INCLUDING_WINDOW: u32 = 1 << 3;
+    pub const K_CG_WINDOW_IMAGE_BOUNDS_IGNORE_FRAMING: u32 = 1 << 0;
+    pub const K_CG_WINDOW_IMAGE_NOMINAL_RESOLUTION: u32 = 1 << 4;
+    pub const K_CG_IMAGE_ALPHA_PREMULTIPLIED_LAST: u32 = 1;
+    pub const K_CG_BITMAP_BYTE_ORDER32_BIG: u32 = 4 << 12;
+    pub const K_CG_INTERPOLATION_QUALITY_HIGH: i32 = 4;
+
+    pub type CGFloat = f64;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGPoint {
+        pub x: CGFloat,
+        pub y: CGFloat,
+    }
+
+    impl CGPoint {
+        pub fn new(x: CGFloat, y: CGFloat) -> Self {
+            Self { x, y }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGSize {
+        pub width: CGFloat,
+        pub height: CGFloat,
+    }
+
+    impl CGSize {
+        pub fn new(width: CGFloat, height: CGFloat) -> Self {
+            Self { width, height }
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGRect {
+        pub origin: CGPoint,
+        pub size: CGSize,
+    }
+
+    impl CGRect {
+        pub fn new(origin: &CGPoint, size: &CGSize) -> Self {
+            Self {
+                origin: *origin,
+                size: *size,
+            }
+        }
+    }
+
+    pub struct CGImageHandle(*mut c_void);
+
+    impl CGImageHandle {
+        pub fn window_image(
+            screen_bounds: CGRect,
+            list_option: u32,
+            window_id: u32,
+            image_option: u32,
+        ) -> Option<Self> {
+            let image = unsafe {
+                CGWindowListCreateImage(screen_bounds, list_option, window_id, image_option)
+            };
+            if image.is_null() {
+                None
+            } else {
+                Some(Self(image))
+            }
+        }
+
+        pub fn width(&self) -> usize {
+            unsafe { CGImageGetWidth(self.0) }
+        }
+
+        pub fn height(&self) -> usize {
+            unsafe { CGImageGetHeight(self.0) }
+        }
+    }
+
+    impl Drop for CGImageHandle {
+        fn drop(&mut self) {
+            unsafe { CGImageRelease(self.0) }
+        }
+    }
+
+    pub struct CGColorSpaceHandle(*mut c_void);
+
+    impl CGColorSpaceHandle {
+        pub fn device_rgb() -> Option<Self> {
+            let color_space = unsafe { CGColorSpaceCreateDeviceRGB() };
+            if color_space.is_null() {
+                None
+            } else {
+                Some(Self(color_space))
+            }
+        }
+    }
+
+    impl Drop for CGColorSpaceHandle {
+        fn drop(&mut self) {
+            unsafe { CGColorSpaceRelease(self.0) }
+        }
+    }
+
+    pub struct CGContextHandle(*mut c_void);
+
+    impl CGContextHandle {
+        pub fn bitmap_context(
+            data: *mut c_void,
+            width: usize,
+            height: usize,
+            bits_per_component: usize,
+            bytes_per_row: usize,
+            color_space: &CGColorSpaceHandle,
+            bitmap_info: u32,
+        ) -> Option<Self> {
+            let context = unsafe {
+                CGBitmapContextCreate(
+                    data,
+                    width,
+                    height,
+                    bits_per_component,
+                    bytes_per_row,
+                    color_space.0,
+                    bitmap_info,
+                )
+            };
+            if context.is_null() {
+                None
+            } else {
+                Some(Self(context))
+            }
+        }
+
+        pub fn translate(&self, tx: CGFloat, ty: CGFloat) {
+            unsafe { CGContextTranslateCTM(self.0, tx, ty) }
+        }
+
+        pub fn scale(&self, sx: CGFloat, sy: CGFloat) {
+            unsafe { CGContextScaleCTM(self.0, sx, sy) }
+        }
+
+        pub fn set_interpolation_quality(&self, quality: i32) {
+            unsafe { CGContextSetInterpolationQuality(self.0, quality) }
+        }
+
+        pub fn draw_image(&self, rect: CGRect, image: &CGImageHandle) {
+            unsafe { CGContextDrawImage(self.0, rect, image.0) }
+        }
+
+        pub fn flush(&self) {
+            unsafe { CGContextFlush(self.0) }
+        }
+    }
+
+    impl Drop for CGContextHandle {
+        fn drop(&mut self) {
+            unsafe { CGContextRelease(self.0) }
+        }
+    }
+
+    pub fn cgrect_null() -> CGRect {
+        unsafe { CGRectNull }
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        static CGRectNull: CGRect;
+
+        fn CGWindowListCreateImage(
+            screen_bounds: CGRect,
+            list_option: u32,
+            window_id: u32,
+            image_option: u32,
+        ) -> *mut c_void;
+        fn CGImageRelease(image: *mut c_void);
+        fn CGImageGetWidth(image: *mut c_void) -> usize;
+        fn CGImageGetHeight(image: *mut c_void) -> usize;
+        fn CGColorSpaceCreateDeviceRGB() -> *mut c_void;
+        fn CGColorSpaceRelease(color_space: *mut c_void);
+        fn CGBitmapContextCreate(
+            data: *mut c_void,
+            width: usize,
+            height: usize,
+            bits_per_component: usize,
+            bytes_per_row: usize,
+            color_space: *mut c_void,
+            bitmap_info: u32,
+        ) -> *mut c_void;
+        fn CGContextRelease(context: *mut c_void);
+        fn CGContextTranslateCTM(context: *mut c_void, tx: CGFloat, ty: CGFloat);
+        fn CGContextScaleCTM(context: *mut c_void, sx: CGFloat, sy: CGFloat);
+        fn CGContextSetInterpolationQuality(context: *mut c_void, quality: i32);
+        fn CGContextDrawImage(context: *mut c_void, rect: CGRect, image: *mut c_void);
+        fn CGContextFlush(context: *mut c_void);
+    }
 }
 
 fn create_shm_file(size: usize) -> Result<File, String> {
@@ -822,11 +1119,22 @@ impl Dispatch<WlShmPool, ()> for BridgeState {
 impl Dispatch<WlBuffer, ()> for BridgeState {
     fn event(
         _state: &mut Self,
-        _: &WlBuffer,
-        _: <WlBuffer as Proxy>::Event,
+        buffer: &WlBuffer,
+        event: <WlBuffer as Proxy>::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        if let wayland_client::protocol::wl_buffer::Event::Release = event {
+            for window in _state.windows.values_mut() {
+                if let Some(buffers) = window.buffers.as_mut() {
+                    for slot in &mut buffers.slots {
+                        if slot.buffer == *buffer {
+                            slot.busy = false;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
